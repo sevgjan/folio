@@ -1,5 +1,4 @@
 import HighlightSwift
-import LaTeXSwiftUI
 import Markdown
 import SwiftUI
 
@@ -45,7 +44,7 @@ struct BlockView: View {
         case let heading as Heading:
             InlineText(children: Array(heading.children))
                 .font(fontForHeading(heading.level, scale: fontScale))
-                .padding(.top, 8 * fontScale)
+                .padding(.top, 20 * fontScale)
                 .centeredReadingColumn(maxWidth: readingWidth)
         case let paragraph as Paragraph:
             ParagraphView(paragraph: paragraph)
@@ -72,6 +71,8 @@ struct BlockView: View {
             .centeredReadingColumn(maxWidth: readingWidth)
         case let table as Markdown.Table:
             TableView(table: table)
+                .focusable(false)
+                .accessibilityElement(children: .combine)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case is ThematicBreak:
             Divider()
@@ -95,12 +96,102 @@ struct ParagraphView: View {
         let raw = paragraph.format()
         Group {
             if raw.contains("$") || raw.contains("\\(") || raw.contains("\\[") {
-                LaTeX(raw)
+                MathText(raw: raw)
+                    .focusable(false)
             } else {
                 InlineText(children: Array(paragraph.children))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// LaTeXSwiftUI's rasterizer (SwiftDraw) can't parse MathJax's SVG output, so
+/// equations render blank or as raw fallback text inconsistently. Until that's
+/// fixed upstream, show the LaTeX source itself in a clearly-distinguished style
+/// rather than attempting (and silently failing) real typesetting.
+private struct MathSegment {
+    let text: String
+    let isEquation: Bool
+    let isBlock: Bool
+}
+
+private func splitMathSegments(_ raw: String) -> [MathSegment] {
+    let pattern = #"\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\$[^\$\n]+?\$|\\\([\s\S]+?\\\)"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+        return [MathSegment(text: raw, isEquation: false, isBlock: false)]
+    }
+    let nsRaw = raw as NSString
+    var segments: [MathSegment] = []
+    var lastEnd = 0
+
+    regex.enumerateMatches(in: raw, range: NSRange(location: 0, length: nsRaw.length)) { match, _, _ in
+        guard let match else { return }
+        let start = match.range.location
+        let end = start + match.range.length
+
+        // Skip matches wrapped in backticks (a literal `$...$` code example, not real math).
+        let precededByBacktick = start > 0 && nsRaw.substring(with: NSRange(location: start - 1, length: 1)) == "`"
+        let followedByBacktick = end < nsRaw.length && nsRaw.substring(with: NSRange(location: end, length: 1)) == "`"
+        if precededByBacktick && followedByBacktick { return }
+
+        if start > lastEnd {
+            segments.append(MathSegment(text: nsRaw.substring(with: NSRange(location: lastEnd, length: start - lastEnd)), isEquation: false, isBlock: false))
+        }
+        let matched = nsRaw.substring(with: match.range)
+        let isBlock = matched.hasPrefix("$$") || matched.hasPrefix("\\[")
+        segments.append(MathSegment(text: stripMathDelimiters(matched), isEquation: true, isBlock: isBlock))
+        lastEnd = end
+    }
+    if lastEnd < nsRaw.length {
+        segments.append(MathSegment(text: nsRaw.substring(from: lastEnd), isEquation: false, isBlock: false))
+    }
+    return segments
+}
+
+private func stripMathDelimiters(_ s: String) -> String {
+    if s.hasPrefix("$$") && s.hasSuffix("$$") {
+        return String(s.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if s.hasPrefix("\\[") && s.hasSuffix("\\]") {
+        return String(s.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if s.hasPrefix("\\(") && s.hasSuffix("\\)") {
+        return String(s.dropFirst(2).dropLast(2))
+    }
+    if s.hasPrefix("$") && s.hasSuffix("$") {
+        return String(s.dropFirst(1).dropLast(1))
+    }
+    return s
+}
+
+struct MathText: View {
+    let raw: String
+    @Environment(\.markdownFontScale) private var fontScale
+
+    var body: some View {
+        let segments = splitMathSegments(raw)
+        if segments.count == 1, let only = segments.first, only.isEquation, only.isBlock {
+            SwiftUI.Text(only.text)
+                .font(.system(size: 14 * fontScale, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            segments.reduce(SwiftUI.Text("")) { partial, segment in
+                if segment.isEquation {
+                    return partial + SwiftUI.Text(segment.text)
+                        .font(.system(size: 14 * fontScale, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else {
+                    return partial + SwiftUI.Text(segment.text)
+                }
+            }
+            .lineSpacing(6 * fontScale)
+        }
     }
 }
 
@@ -119,6 +210,8 @@ struct CodeBlockView: View {
             }
             .frame(height: min(max(mermaidHeight, 60), mermaidMaxHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.disabled)
+            .focusable(false)
         } else {
             CodeText(codeBlock.code)
                 .codeTextStyle(.card)

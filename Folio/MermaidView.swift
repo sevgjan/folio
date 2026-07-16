@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import WebKit
 
+private final class NonFocusableWebView: WKWebView {
+    override var acceptsFirstResponder: Bool { false }
+}
+
 struct MermaidView: NSViewRepresentable {
     let code: String
     @Binding var height: CGFloat
@@ -12,7 +16,7 @@ struct MermaidView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = NonFocusableWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
         context.coordinator.lastCode = code
         load(in: webView)

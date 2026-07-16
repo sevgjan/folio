@@ -67,9 +67,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
-            textView.handleSelectionChange { newText in
-                text.wrappedValue = newText
-            }
+            textView.handleSelectionChange()
         }
     }
 }
@@ -79,20 +77,10 @@ final class MarkdownTextView: NSTextView {
         didSet { restyle() }
     }
 
-    private var lastTableRange: NSRange?
     private var lastActiveLineLocation: Int?
 
-    func handleSelectionChange(onTextReplaced: (String) -> Void) {
+    func handleSelectionChange() {
         let cursorLocation = selectedRange().location
-        let currentTableRange = tableBlockRange(containing: cursorLocation)
-
-        if let previous = lastTableRange, currentTableRange?.location != previous.location {
-            if let newText = alignTable(in: previous) {
-                onTextReplaced(newText)
-            }
-        }
-
-        lastTableRange = tableBlockRange(containing: selectedRange().location)
 
         guard let textStorage else { return }
         let activeLineLocation = (textStorage.string as NSString).lineRange(for: selectedRange()).location
@@ -224,23 +212,6 @@ final class MarkdownTextView: NSTextView {
     private func isTableRowLine(_ nsText: NSString, _ lineRange: NSRange) -> Bool {
         let line = nsText.substring(with: lineRange)
         return MarkdownStyleRegex.tableRow.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
-    }
-
-    @discardableResult
-    private func alignTable(in range: NSRange) -> String? {
-        guard let textStorage else { return nil }
-        let nsText = textStorage.string as NSString
-        guard range.location + range.length <= nsText.length else { return nil }
-
-        var block = nsText.substring(with: range)
-        let hadTrailingNewline = block.hasSuffix("\n")
-        if hadTrailingNewline { block.removeLast() }
-
-        guard let aligned = MarkdownTableFormatter.align(block), aligned != block else { return nil }
-        let replacement = hadTrailingNewline ? aligned + "\n" : aligned
-
-        replaceRange(range, with: replacement)
-        return textStorage.string
     }
 
     private func replaceRange(_ range: NSRange, with replacement: String) {
