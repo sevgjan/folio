@@ -1,0 +1,62 @@
+name: Folio
+options:
+  bundleIdPrefix: com.sevgjan
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  SwiftMarkdown:
+    url: https://github.com/swiftlang/swift-markdown.git
+    branch: main
+  HighlightSwift:
+    url: https://github.com/appstefan/HighlightSwift.git
+    from: 1.1.0
+  LaTeXSwiftUI:
+    url: https://github.com/colinc86/LaTeXSwiftUI.git
+    from: 2.0.0
+targets:
+  Folio:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Folio
+        type: syncedFolder
+    info:
+      path: Folio/Info.plist
+      properties:
+        CFBundleDisplayName: Folio
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: ""
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown Document
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - net.daringfireball.markdown
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.daringfireball.markdown
+            UTTypeDescription: Markdown Document
+            UTTypeConformsTo:
+              - public.plain-text
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - md
+                - markdown
+    entitlements:
+      path: Folio/Folio.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: com.sevgjan.folio
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+    dependencies:
+      - package: SwiftMarkdown
+        product: Markdown
+      - package: HighlightSwift
+        product: HighlightSwift
+      - package: LaTeXSwiftUI
+        product: LaTeXSwiftUI
