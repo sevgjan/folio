@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 @main
 struct FolioApp: App {
     @State private var updateStore = UpdateStore()
+    @AppStorage("hasSetDefaultMarkdownViewer") private var hasSetDefault = false
 
     var body: some Scene {
         DocumentGroup(newDocument: MarkdownDocument()) { file in
@@ -12,6 +13,7 @@ struct FolioApp: App {
                 .environment(updateStore)
                 .task {
                     await updateStore.checkForUpdatesOnce()
+                    setDefaultMarkdownViewerOnce()
                 }
         }
         .defaultSize(width: 900, height: 988)
@@ -22,6 +24,12 @@ struct FolioApp: App {
                 }
             }
         }
+    }
+
+    private func setDefaultMarkdownViewerOnce() {
+        guard !hasSetDefault else { return }
+        hasSetDefault = true
+        setAsDefaultMarkdownViewer()
     }
 
     private func setAsDefaultMarkdownViewer() {
