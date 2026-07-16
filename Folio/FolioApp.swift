@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct FolioApp: App {
@@ -13,5 +15,21 @@ struct FolioApp: App {
                 }
         }
         .defaultSize(width: 900, height: 988)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Set Folio as Default Markdown Viewer…") {
+                    setAsDefaultMarkdownViewer()
+                }
+            }
+        }
+    }
+
+    private func setAsDefaultMarkdownViewer() {
+        guard let markdownType = UTType("net.daringfireball.markdown") else { return }
+        NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: markdownType) { error in
+            if let error {
+                NSLog("Folio: failed to set default markdown viewer: \(error)")
+            }
+        }
     }
 }
