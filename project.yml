@@ -29,7 +29,7 @@ targets:
         NSHumanReadableCopyright: ""
         CFBundleDocumentTypes:
           - CFBundleTypeName: Markdown Document
-            CFBundleTypeRole: Viewer
+            CFBundleTypeRole: Editor
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - net.daringfireball.markdown
@@ -61,3 +61,40 @@ targets:
         product: HighlightSwift
       - package: LaTeXSwiftUI
         product: LaTeXSwiftUI
+      - target: FolioQuickLook
+        embed: true
+
+  FolioQuickLook:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: FolioQuickLook
+        type: syncedFolder
+    info:
+      path: FolioQuickLook/Info.plist
+      properties:
+        CFBundleDisplayName: Folio Quick Look
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewProvider
+          NSExtensionAttributes:
+            QLSupportedContentTypes:
+              - net.daringfireball.markdown
+            QLIsDataBasedPreview: true
+    entitlements:
+      path: FolioQuickLook/FolioQuickLook.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+    settings:
+      base:
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: com.sevgjan.folio.QuickLook
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: SwiftMarkdown
+        product: Markdown
