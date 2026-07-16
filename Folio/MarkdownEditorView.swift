@@ -80,6 +80,7 @@ final class MarkdownTextView: NSTextView {
     }
 
     private var lastTableRange: NSRange?
+    private var lastActiveLineLocation: Int?
 
     func handleSelectionChange(onTextReplaced: (String) -> Void) {
         let cursorLocation = selectedRange().location
@@ -92,6 +93,59 @@ final class MarkdownTextView: NSTextView {
         }
 
         lastTableRange = tableBlockRange(containing: selectedRange().location)
+
+        guard let textStorage else { return }
+        let activeLineLocation = (textStorage.string as NSString).lineRange(for: selectedRange()).location
+        guard activeLineLocation != lastActiveLineLocation else { return }
+
+        let previousLocation = lastActiveLineLocation
+        lastActiveLineLocation = activeLineLocation
+
+        if let previousLocation,
+           let oldBlock = stableBlockRange(containing: previousLocation),
+           let newBlock = stableBlockRange(containing: cursorLocation),
+           oldBlock == newBlock {
+            return
+        }
+
+        restyle()
+    }
+
+    /// A table or fenced code block: ranges where per-line active-line styling never differs,
+    /// so moving the cursor between lines inside the same one shouldn't trigger a restyle.
+    private func stableBlockRange(containing location: Int) -> NSRange? {
+        if let table = tableBlockRange(containing: location) { return table }
+        return codeFenceBlockRange(containing: location)
+    }
+
+    private func codeFenceBlockRange(containing location: Int) -> NSRange? {
+        guard let textStorage else { return nil }
+        let nsText = textStorage.string as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        guard fullRange.length > 0, location >= 0, location <= nsText.length else { return nil }
+
+        var fenceStart: Int?
+        var result: NSRange?
+
+        nsText.enumerateSubstrings(in: fullRange, options: [.byLines]) { line, lineRange, enclosingRange, stop in
+            guard let line else { return }
+            let lineNS = line as NSString
+            guard MarkdownStyleRegex.codeFence.firstMatch(in: line, range: NSRange(location: 0, length: lineNS.length)) != nil else { return }
+
+            if let start = fenceStart {
+                let blockEnd = enclosingRange.location + enclosingRange.length
+                let range = NSRange(location: start, length: blockEnd - start)
+                if location >= range.location && location <= blockEnd {
+                    result = range
+                    stop.pointee = true
+                }
+                fenceStart = nil
+            } else {
+                fenceStart = lineRange.location
+            }
+        }
+
+        return result
     }
 
     func allTableBlocks() -> [(range: NSRange, text: String)] {
@@ -210,6 +264,7 @@ final class MarkdownTextView: NSTextView {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         guard fullRange.length > 0 else { return }
         let nsText = textStorage.string as NSString
+        let activeLineRange = nsText.lineRange(for: selectedRange())
 
         let baseFont = NSFont.systemFont(ofSize: baseFontSize)
         let monoFont = NSFont.monospacedSystemFont(ofSize: baseFontSize - 1, weight: .regular)
@@ -238,6 +293,9 @@ final class MarkdownTextView: NSTextView {
                 NSRange(location: lineRange.location + range.location, length: range.length)
             }
 
+            let isActiveLine = lineRange.location == activeLineRange.location
+            let markerColor: NSColor = isActiveLine ? mutedColor : .clear
+
             if MarkdownStyleRegex.codeFence.firstMatch(in: line, range: lineFullRange) != nil {
                 inCodeFence.toggle()
                 textStorage.addAttributes([.font: monoFont, .foregroundColor: mutedColor], range: lineRange)
@@ -253,7 +311,7 @@ final class MarkdownTextView: NSTextView {
                 let level = match.range(at: 1).length
                 let size = self.baseFontSize + CGFloat(max(0, 6 - level)) * 3
                 textStorage.addAttributes([.font: NSFont.boldSystemFont(ofSize: size)], range: lineRange)
-                textStorage.addAttributes([.font: NSFont.systemFont(ofSize: 11), .foregroundColor: mutedColor], range: absolute(match.range(at: 0)))
+                textStorage.addAttributes([.font: NSFont.systemFont(ofSize: 11), .foregroundColor: markerColor], range: absolute(match.range(at: 0)))
             }
 
             if MarkdownStyleRegex.tableRow.firstMatch(in: line, range: lineFullRange) != nil {
@@ -279,8 +337,8 @@ final class MarkdownTextView: NSTextView {
                 let openMarker = NSRange(location: match.range(at: 0).location, length: markerLength)
                 let closeMarker = NSRange(location: content.location + content.length, length: markerLength)
                 textStorage.addAttributes([.font: NSFont.boldSystemFont(ofSize: self.baseFontSize)], range: absolute(content))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(openMarker))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(closeMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(openMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(closeMarker))
             }
 
             MarkdownStyleRegex.italic.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
@@ -292,8 +350,8 @@ final class MarkdownTextView: NSTextView {
                 let closeMarker = NSRange(location: content.location + content.length, length: 1)
                 let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
                 textStorage.addAttributes([.font: italicFont], range: absolute(content))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(openMarker))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(closeMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(openMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(closeMarker))
             }
 
             MarkdownStyleRegex.strikethrough.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
@@ -302,8 +360,8 @@ final class MarkdownTextView: NSTextView {
                 textStorage.addAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue], range: absolute(content))
                 let openMarker = NSRange(location: match.range(at: 0).location, length: 2)
                 let closeMarker = NSRange(location: content.location + content.length, length: 2)
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(openMarker))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(closeMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(openMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(closeMarker))
             }
 
             MarkdownStyleRegex.inlineCode.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
@@ -312,8 +370,8 @@ final class MarkdownTextView: NSTextView {
                 textStorage.addAttributes([.font: monoFont, .backgroundColor: codeBackground], range: absolute(content))
                 let openMarker = NSRange(location: match.range(at: 0).location, length: 1)
                 let closeMarker = NSRange(location: content.location + content.length, length: 1)
-                textStorage.addAttributes([.foregroundColor: mutedColor, .font: monoFont], range: absolute(openMarker))
-                textStorage.addAttributes([.foregroundColor: mutedColor, .font: monoFont], range: absolute(closeMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor, .font: monoFont], range: absolute(openMarker))
+                textStorage.addAttributes([.foregroundColor: markerColor, .font: monoFont], range: absolute(closeMarker))
             }
 
             MarkdownStyleRegex.link.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
@@ -324,8 +382,8 @@ final class MarkdownTextView: NSTextView {
                 let prefixRange = NSRange(location: full.location, length: 1)
                 let suffixRange = NSRange(location: contentEnd, length: full.location + full.length - contentEnd)
                 textStorage.addAttributes([.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue], range: absolute(textContent))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(prefixRange))
-                textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(suffixRange))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(prefixRange))
+                textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(suffixRange))
             }
 
             MarkdownStyleRegex.mathSpan.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
