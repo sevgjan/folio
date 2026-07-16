@@ -110,6 +110,8 @@ struct ContentView: View {
                                     } icon: {
                                         if let icon = editor.icon {
                                             Image(nsImage: icon)
+                                                .resizable()
+                                                .frame(width: 16, height: 16)
                                         }
                                     }
                                 }
@@ -123,6 +125,8 @@ struct ContentView: View {
                                 Text("Reveal in Finder")
                             } icon: {
                                 Image(nsImage: finderIcon)
+                                    .resizable()
+                                    .frame(width: 16, height: 16)
                             }
                         }
                     } label: {
