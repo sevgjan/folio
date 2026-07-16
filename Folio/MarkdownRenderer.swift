@@ -107,12 +107,18 @@ struct ParagraphView: View {
 struct CodeBlockView: View {
     let codeBlock: CodeBlock
     @Environment(\.markdownFontScale) private var fontScale
+    @State private var mermaidHeight: CGFloat = 160
+
+    private let mermaidMaxHeight: CGFloat = 480
 
     var body: some View {
         if (codeBlock.language ?? "").lowercased() == "mermaid" {
-            MermaidView(code: codeBlock.code)
-                .frame(minHeight: 160)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                MermaidView(code: codeBlock.code, height: $mermaidHeight)
+                    .frame(height: mermaidHeight)
+            }
+            .frame(height: min(max(mermaidHeight, 60), mermaidMaxHeight))
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             CodeText(codeBlock.code)
                 .codeTextStyle(.card)

@@ -6,6 +6,6 @@ struct FolioApp: App {
         DocumentGroup(newDocument: MarkdownDocument()) { file in
             ContentView(document: file.$document, fileURL: file.fileURL)
         }
-        .defaultSize(width: 900, height: 760)
+        .defaultSize(width: 900, height: 988)
     }
 }
