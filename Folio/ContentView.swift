@@ -9,6 +9,7 @@ private struct TableEditorSession: Identifiable {
 struct ContentView: View {
     @Binding var document: MarkdownDocument
     let fileURL: URL?
+    @Environment(UpdateStore.self) private var updateStore
     @State private var zoom: CGFloat = 1.0
     @State private var isPreviewing = true
     @State private var editableTextView: MarkdownTextView?
@@ -19,23 +20,30 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if isPreviewing {
-                ScrollView {
-                    MarkdownRenderer(markdown: document.text)
-                        .font(.system(size: 15 * zoom))
-                        .environment(\.markdownFontScale, zoom)
-                        .padding(32)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .onTapGesture(count: 3) {
-                    isPreviewing = false
-                }
-            } else {
-                MarkdownEditorView(text: $document.text, fontSize: 16 * zoom) { textView in
-                    DispatchQueue.main.async {
-                        editableTextView = textView
+        VStack(spacing: 0) {
+            if updateStore.state != .none {
+                UpdateBannerView(store: updateStore)
+                Divider()
+            }
+
+            Group {
+                if isPreviewing {
+                    ScrollView {
+                        MarkdownRenderer(markdown: document.text)
+                            .font(.system(size: 15 * zoom))
+                            .environment(\.markdownFontScale, zoom)
+                            .padding(32)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .onTapGesture(count: 3) {
+                        isPreviewing = false
+                    }
+                } else {
+                    MarkdownEditorView(text: $document.text, fontSize: 16 * zoom) { textView in
+                        DispatchQueue.main.async {
+                            editableTextView = textView
+                        }
                     }
                 }
             }
