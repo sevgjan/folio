@@ -1,20 +1,31 @@
+import Cocoa
 import QuickLookUI
-import UniformTypeIdentifiers
 
-final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
-    func providePreview(for request: QLFilePreviewRequest, completionHandler handler: @escaping (QLPreviewReply?, Error?) -> Void) {
+final class PreviewProvider: NSViewController, @MainActor QLPreviewingController {
+    private let textView = NSTextView()
+
+    override func loadView() {
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 820, height: 1040))
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = true
+
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.textContainerInset = NSSize(width: 28, height: 28)
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+
+        scrollView.documentView = textView
+        view = scrollView
+    }
+
+    func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         do {
-            let text = try String(contentsOf: request.fileURL, encoding: .utf8)
-            let html = MarkdownHTMLRenderer.render(text, title: request.fileURL.lastPathComponent)
-            let data = Data(html.utf8)
-
-            let reply = QLPreviewReply(dataOfContentType: .html, contentSize: CGSize(width: 820, height: 1040)) { replyToUpdate in
-                replyToUpdate.stringEncoding = .utf8
-                return data
-            }
-            handler(reply, nil)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            textView.textStorage?.setAttributedString(MarkdownAttributedRenderer.render(text))
+            handler(nil)
         } catch {
-            handler(nil, error)
+            handler(error)
         }
     }
 }

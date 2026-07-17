@@ -50,7 +50,15 @@ cp -R "$APP_SRC" "$APP_STAGED"
 
 # Ad-hoc sign so macOS has a consistent code signature. Does NOT bypass Gatekeeper
 # (that needs a paid Apple Developer ID + notarization); it just gives the bundle a signature.
-codesign --force --deep --sign - "$APP_STAGED"
+# Sign inside-out with explicit --entitlements per bundle: `--deep` alone re-signs nested
+# bundles but without entitlements, which drops FolioQuickLook's sandbox entitlement and
+# makes PlugInKit reject it ("plug-ins must be sandboxed"), silently breaking Quick Look.
+codesign --force --sign - \
+  --entitlements "$PROJECT_DIR/FolioQuickLook/FolioQuickLook.entitlements" \
+  "$APP_STAGED/Contents/PlugIns/FolioQuickLook.appex"
+codesign --force --sign - \
+  --entitlements "$PROJECT_DIR/Folio/Folio.entitlements" \
+  "$APP_STAGED"
 
 DMG_PATH="$BUILD_DIR/${APP_NAME}-${VERSION}.dmg"
 create-dmg \
