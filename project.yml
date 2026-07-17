@@ -25,6 +25,8 @@ targets:
       path: Folio/Info.plist
       properties:
         CFBundleDisplayName: Folio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: ""
         CFBundleDocumentTypes:
