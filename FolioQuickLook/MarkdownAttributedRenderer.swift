@@ -83,7 +83,7 @@ enum MarkdownAttributedRenderer {
             return NSAttributedString(string: "―――――――――――――――――\n\n", attributes: attrs)
         default:
             let font = NSFont.systemFont(ofSize: 14)
-            let text = NSMutableAttributedString(string: markup.format() + "\n", attributes: [.font: font])
+            let text = NSMutableAttributedString(string: markup.format() + "\n", attributes: [.font: font, .foregroundColor: NSColor.labelColor])
             return text
         }
     }
@@ -94,7 +94,7 @@ enum MarkdownAttributedRenderer {
         var isFirst = true
         for child in item.children {
             if let paragraph = child as? Paragraph {
-                let line = NSMutableAttributedString(string: isFirst ? prefix : "", attributes: [.font: font])
+                let line = NSMutableAttributedString(string: isFirst ? prefix : "", attributes: [.font: font, .foregroundColor: NSColor.labelColor])
                 line.append(NSAttributedString(inlineChildren: Array(paragraph.children), baseFont: font))
                 line.addAttribute(.paragraphStyle, value: paragraphStyle(spacingAfter: 6, indent: indent + 18), range: NSRange(location: 0, length: line.length))
                 line.append(NSAttributedString(string: "\n"))
@@ -155,7 +155,7 @@ private extension NSAttributedString {
     static func inline(for node: Markup, baseFont: NSFont) -> NSAttributedString {
         switch node {
         case let text as Markdown.Text:
-            return NSAttributedString(string: text.string, attributes: [.font: baseFont])
+            return NSAttributedString(string: text.string, attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor])
         case let emphasis as Emphasis:
             let font = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
             let result = NSMutableAttributedString()
@@ -170,6 +170,7 @@ private extension NSAttributedString {
             let font = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
             return NSAttributedString(string: code.code, attributes: [
                 .font: font,
+                .foregroundColor: NSColor.labelColor,
                 .backgroundColor: NSColor(white: 0.5, alpha: 0.15)
             ])
         case let link as Markdown.Link:
@@ -186,7 +187,7 @@ private extension NSAttributedString {
         case is LineBreak:
             return NSAttributedString(string: "\n", attributes: [.font: baseFont])
         default:
-            return NSAttributedString(string: node.format(), attributes: [.font: baseFont])
+            return NSAttributedString(string: node.format(), attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor])
         }
     }
 }
