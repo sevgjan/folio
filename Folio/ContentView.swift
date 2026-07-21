@@ -12,9 +12,17 @@ struct ContentView: View {
     @Environment(UpdateStore.self) private var updateStore
     @Environment(SettingsStore.self) private var settingsStore
     @State private var zoom: CGFloat = 1.0
-    @State private var isPreviewing = true
+    @State private var isPreviewing: Bool
     @State private var editableTextView: MarkdownTextView?
     @State private var tableEditorSession: TableEditorSession?
+
+    init(document: Binding<MarkdownDocument>, fileURL: URL?) {
+        self._document = document
+        self.fileURL = fileURL
+        // A brand-new, unsaved document has no fileURL — start it in edit mode
+        // instead of previewing blank content.
+        self._isPreviewing = State(initialValue: fileURL != nil)
+    }
 
     private var finderIcon: NSImage {
         NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
@@ -182,7 +190,7 @@ struct ContentView: View {
 /// switching a themed doc back to "System" left the window stuck dark, making `.primary` text
 /// invisible against the now-light background. Setting `NSWindow.appearance` directly instead
 /// is unaffected by that bug: it's a plain AppKit property write, always applied fresh.
-private struct WindowAppearanceSetter: NSViewRepresentable {
+struct WindowAppearanceSetter: NSViewRepresentable {
     let colorScheme: ColorScheme?
 
     func makeNSView(context: Context) -> NSView {

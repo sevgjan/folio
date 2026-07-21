@@ -4,11 +4,19 @@ import UniformTypeIdentifiers
 
 @main
 struct FolioApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var updateStore = UpdateStore()
     @State private var settingsStore = SettingsStore()
     @AppStorage("hasSetDefaultMarkdownViewer") private var hasSetDefault = false
 
     var body: some Scene {
+        Window("Welcome to Folio", id: "welcome") {
+            WelcomeView()
+                .environment(settingsStore)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+
         DocumentGroup(newDocument: MarkdownDocument()) { file in
             ContentView(document: file.$document, fileURL: file.fileURL)
                 .environment(updateStore)
@@ -24,6 +32,9 @@ struct FolioApp: App {
                 Button("Set Folio as Default Markdown Viewer…") {
                     setAsDefaultMarkdownViewer()
                 }
+            }
+            CommandGroup(after: .newItem) {
+                WelcomeMenuButton()
             }
         }
 
@@ -46,5 +57,16 @@ struct FolioApp: App {
                 NSLog("Folio: failed to set default markdown viewer: \(error)")
             }
         }
+    }
+}
+
+private struct WelcomeMenuButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Welcome to Folio…") {
+            openWindow(id: "welcome")
+        }
+        .keyboardShortcut("1", modifiers: [.command, .shift])
     }
 }
