@@ -36,6 +36,9 @@ struct FolioApp: App {
             CommandGroup(after: .newItem) {
                 WelcomeMenuButton()
             }
+            CommandGroup(after: .pasteboard) {
+                FindMenuButtons()
+            }
         }
 
         Settings {
@@ -68,5 +71,30 @@ private struct WelcomeMenuButton: View {
             openWindow(id: "welcome")
         }
         .keyboardShortcut("1", modifiers: [.command, .shift])
+    }
+}
+
+/// The editor is a plain NSTextView, which already implements find/replace via the modern
+/// find bar (NSTextFinder) — it just needs menu items wired to `performFindPanelAction(_:)`
+/// with the right tag, the same way AppKit apps have exposed Find since forever. Declaring
+/// these through SwiftUI's own Commands (rather than mutating NSApp.mainMenu directly) avoids
+/// a race where SwiftUI rebuilds the Edit menu after launch and silently drops manual edits.
+private struct FindMenuButtons: View {
+    var body: some View {
+        Divider()
+        Button("Find…") { performFind(.showFindInterface) }
+            .keyboardShortcut("f", modifiers: .command)
+        Button("Find Next") { performFind(.nextMatch) }
+            .keyboardShortcut("g", modifiers: .command)
+        Button("Find Previous") { performFind(.previousMatch) }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+        // No keyboard shortcut: ⌘E is already Folio's Preview/Edit toggle.
+        Button("Use Selection for Find") { performFind(.setSearchString) }
+    }
+
+    private func performFind(_ action: NSTextFinder.Action) {
+        let sender = NSMenuItem()
+        sender.tag = action.rawValue
+        NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: sender)
     }
 }

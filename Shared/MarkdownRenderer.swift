@@ -292,16 +292,27 @@ struct ListView: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .top, spacing: 6) {
-                    SwiftUI.Text(ordered ? "\(index + 1)." : "\u{2022}")
-                        .foregroundColor(theme.secondary)
+                    marker(for: item, index: index)
                         .frame(minWidth: 14, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             BlockView(block: child)
                         }
                     }
+                    .opacity(item.checkbox == .checked ? 0.6 : 1)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func marker(for item: ListItem, index: Int) -> some View {
+        if let checkbox = item.checkbox {
+            Image(systemName: checkbox == .checked ? "checkmark.square.fill" : "square")
+                .foregroundStyle(checkbox == .checked ? theme.accent : theme.secondary)
+        } else {
+            SwiftUI.Text(ordered ? "\(index + 1)." : "\u{2022}")
+                .foregroundColor(theme.secondary)
         }
     }
 }

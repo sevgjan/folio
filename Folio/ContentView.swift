@@ -111,16 +111,13 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("+", modifiers: .command)
             }
-
+            
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.fixed)
+            }
+            
+            
             ToolbarItemGroup {
-                Button {
-                    isPreviewing.toggle()
-                } label: {
-                    Image(systemName: isPreviewing ? "pencil" : "eye")
-                }
-                .keyboardShortcut("e", modifiers: .command)
-                .help(isPreviewing ? "Edit" : "Preview")
-
                 if !isPreviewing {
                     Button {
                         let candidates = (editableTextView?.allTableBlocks() ?? []).compactMap { block -> TableCandidate? in
@@ -134,6 +131,14 @@ struct ContentView: View {
                     }
                     .help("Edit Table")
                 }
+                
+                Button {
+                    isPreviewing.toggle()
+                } label: {
+                    Image(systemName: isPreviewing ? "pencil" : "eye")
+                }
+                .keyboardShortcut("e", modifiers: .command)
+                .help(isPreviewing ? "Edit" : "Preview")
 
                 if let fileURL {
                     Menu {

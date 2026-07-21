@@ -26,6 +26,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        textView.usesFindBar = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
