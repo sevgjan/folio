@@ -4,6 +4,8 @@ import SwiftUI
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
     var fontSize: CGFloat
+    var fontFamily: String = ""
+    var theme: Theme = .system
     var onTextViewReady: (MarkdownTextView) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -11,6 +13,8 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.string = text
         textView.baseFontSize = fontSize
+        textView.fontFamily = fontFamily
+        textView.theme = theme
         textView.isRichText = false
         textView.isEditable = true
         textView.isSelectable = true
@@ -46,6 +50,12 @@ struct MarkdownEditorView: NSViewRepresentable {
         if textView.baseFontSize != fontSize {
             textView.baseFontSize = fontSize
         }
+        if textView.fontFamily != fontFamily {
+            textView.fontFamily = fontFamily
+        }
+        if textView.theme != theme {
+            textView.theme = theme
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -76,8 +86,36 @@ final class MarkdownTextView: NSTextView {
     var baseFontSize: CGFloat = 16 {
         didSet { restyle() }
     }
+    var fontFamily: String = "" {
+        didSet { restyle() }
+    }
+    var theme: Theme = .system {
+        didSet { applyThemeChrome(); restyle() }
+    }
 
     private var lastActiveLineLocation: Int?
+
+    private func applyThemeChrome() {
+        if theme.id == "system" {
+            drawsBackground = true
+            backgroundColor = .textBackgroundColor
+            appearance = nil
+        } else {
+            drawsBackground = true
+            backgroundColor = NSColor(theme.background)
+            appearance = NSAppearance(named: theme.colorScheme == .light ? .aqua : .darkAqua)
+        }
+    }
+
+    private func themedFont(ofSize size: CGFloat) -> NSFont {
+        fontFamily.isEmpty ? .systemFont(ofSize: size) : (NSFont(name: fontFamily, size: size) ?? .systemFont(ofSize: size))
+    }
+
+    private func themedBoldFont(ofSize size: CGFloat) -> NSFont {
+        fontFamily.isEmpty
+            ? .boldSystemFont(ofSize: size)
+            : NSFontManager.shared.convert(themedFont(ofSize: size), toHaveTrait: .boldFontMask)
+    }
 
     func handleSelectionChange() {
         let cursorLocation = selectedRange().location
@@ -237,10 +275,17 @@ final class MarkdownTextView: NSTextView {
         let nsText = textStorage.string as NSString
         let activeLineRange = nsText.lineRange(for: selectedRange())
 
-        let baseFont = NSFont.systemFont(ofSize: baseFontSize)
+        let isSystemTheme = theme.id == "system"
+        let baseFont = themedFont(ofSize: baseFontSize)
         let monoFont = NSFont.monospacedSystemFont(ofSize: baseFontSize - 1, weight: .regular)
-        let mutedColor = NSColor.tertiaryLabelColor
-        let codeBackground = NSColor.textBackgroundColor.blended(withFraction: 0.08, of: .labelColor) ?? .clear
+        let mutedColor: NSColor = isSystemTheme ? .tertiaryLabelColor : NSColor(theme.muted)
+        let codeBackground: NSColor = isSystemTheme
+            ? (NSColor.textBackgroundColor.blended(withFraction: 0.08, of: .labelColor) ?? .clear)
+            : NSColor(theme.codeBackground)
+        let foregroundColor: NSColor = isSystemTheme ? .labelColor : NSColor(theme.foreground)
+        let secondaryColor: NSColor = isSystemTheme ? .secondaryLabelColor : NSColor(theme.secondary)
+        let linkColor: NSColor = isSystemTheme ? .linkColor : NSColor(theme.accent)
+        let mathColor: NSColor = isSystemTheme ? .systemPurple : NSColor(theme.mathAccent)
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = 4
@@ -249,7 +294,7 @@ final class MarkdownTextView: NSTextView {
         textStorage.beginEditing()
         textStorage.setAttributes([
             .font: baseFont,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: foregroundColor,
             .paragraphStyle: paragraphStyle
         ], range: fullRange)
 
@@ -281,7 +326,7 @@ final class MarkdownTextView: NSTextView {
             if let match = MarkdownStyleRegex.heading.firstMatch(in: line, range: lineFullRange) {
                 let level = match.range(at: 1).length
                 let size = self.baseFontSize + CGFloat(max(0, 6 - level)) * 3
-                textStorage.addAttributes([.font: NSFont.boldSystemFont(ofSize: size)], range: lineRange)
+                textStorage.addAttributes([.font: self.themedBoldFont(ofSize: size)], range: lineRange)
                 textStorage.addAttributes([.font: NSFont.systemFont(ofSize: 11), .foregroundColor: markerColor], range: absolute(match.range(at: 0)))
             }
 
@@ -290,7 +335,7 @@ final class MarkdownTextView: NSTextView {
             }
 
             if let match = MarkdownStyleRegex.blockquote.firstMatch(in: line, range: lineFullRange) {
-                textStorage.addAttributes([.foregroundColor: NSColor.secondaryLabelColor], range: lineRange)
+                textStorage.addAttributes([.foregroundColor: secondaryColor], range: lineRange)
                 textStorage.addAttributes([.foregroundColor: mutedColor], range: absolute(match.range(at: 1)))
             }
 
@@ -307,7 +352,7 @@ final class MarkdownTextView: NSTextView {
                 let content = match.range(at: 2)
                 let openMarker = NSRange(location: match.range(at: 0).location, length: markerLength)
                 let closeMarker = NSRange(location: content.location + content.length, length: markerLength)
-                textStorage.addAttributes([.font: NSFont.boldSystemFont(ofSize: self.baseFontSize)], range: absolute(content))
+                textStorage.addAttributes([.font: self.themedBoldFont(ofSize: self.baseFontSize)], range: absolute(content))
                 textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(openMarker))
                 textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(closeMarker))
             }
@@ -352,14 +397,14 @@ final class MarkdownTextView: NSTextView {
                 let contentEnd = textContent.location + textContent.length
                 let prefixRange = NSRange(location: full.location, length: 1)
                 let suffixRange = NSRange(location: contentEnd, length: full.location + full.length - contentEnd)
-                textStorage.addAttributes([.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue], range: absolute(textContent))
+                textStorage.addAttributes([.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue], range: absolute(textContent))
                 textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(prefixRange))
                 textStorage.addAttributes([.foregroundColor: markerColor], range: absolute(suffixRange))
             }
 
             MarkdownStyleRegex.mathSpan.enumerateMatches(in: line, range: lineFullRange) { match, _, _ in
                 guard let match else { return }
-                textStorage.addAttributes([.font: monoFont, .foregroundColor: NSColor.systemPurple], range: absolute(match.range(at: 0)))
+                textStorage.addAttributes([.font: monoFont, .foregroundColor: mathColor], range: absolute(match.range(at: 0)))
             }
         }
 

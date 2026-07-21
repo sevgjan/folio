@@ -6,10 +6,42 @@ private struct MarkdownFontScaleKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1.0
 }
 
+private struct MarkdownThemeKey: EnvironmentKey {
+    static let defaultValue: Theme = .system
+}
+
+private struct MarkdownFontFamilyKey: EnvironmentKey {
+    static let defaultValue: String = ""
+}
+
+private struct MarkdownReadingWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = CGFloat(SettingsStore.Defaults.readingWidth)
+}
+
+private struct MarkdownTableWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = CGFloat(SettingsStore.Defaults.readingWidth * SettingsStore.Defaults.tableWidthRatio)
+}
+
 extension EnvironmentValues {
     var markdownFontScale: CGFloat {
         get { self[MarkdownFontScaleKey.self] }
         set { self[MarkdownFontScaleKey.self] = newValue }
+    }
+    var markdownTheme: Theme {
+        get { self[MarkdownThemeKey.self] }
+        set { self[MarkdownThemeKey.self] = newValue }
+    }
+    var markdownFontFamily: String {
+        get { self[MarkdownFontFamilyKey.self] }
+        set { self[MarkdownFontFamilyKey.self] = newValue }
+    }
+    var markdownReadingWidth: CGFloat {
+        get { self[MarkdownReadingWidthKey.self] }
+        set { self[MarkdownReadingWidthKey.self] = newValue }
+    }
+    var markdownTableWidth: CGFloat {
+        get { self[MarkdownTableWidthKey.self] }
+        set { self[MarkdownTableWidthKey.self] = newValue }
     }
 }
 
@@ -36,8 +68,10 @@ struct MarkdownRenderer: View {
 struct BlockView: View {
     let block: Markup
     @Environment(\.markdownFontScale) private var fontScale
-
-    private let readingWidth: CGFloat = 680
+    @Environment(\.markdownTheme) private var theme
+    @Environment(\.markdownFontFamily) private var fontFamily
+    @Environment(\.markdownReadingWidth) private var readingWidth
+    @Environment(\.markdownTableWidth) private var tableWidth
 
     var body: some View {
         switch block {
@@ -50,8 +84,13 @@ struct BlockView: View {
             ParagraphView(paragraph: paragraph)
                 .centeredReadingColumn(maxWidth: readingWidth)
         case let codeBlock as CodeBlock:
-            CodeBlockView(codeBlock: codeBlock)
-                .centeredReadingColumn(maxWidth: readingWidth)
+            if (codeBlock.language ?? "").lowercased() == "mermaid" {
+                CodeBlockView(codeBlock: codeBlock)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                CodeBlockView(codeBlock: codeBlock)
+                    .centeredReadingColumn(maxWidth: readingWidth)
+            }
         case let list as UnorderedList:
             ListView(items: Array(list.children.compactMap { $0 as? ListItem }), ordered: false)
                 .centeredReadingColumn(maxWidth: readingWidth)
@@ -66,14 +105,14 @@ struct BlockView: View {
             }
             .padding(.leading, 12)
             .overlay(alignment: .leading) {
-                Rectangle().fill(.secondary).frame(width: 3)
+                Rectangle().fill(theme.secondary).frame(width: 3)
             }
             .centeredReadingColumn(maxWidth: readingWidth)
         case let table as Markdown.Table:
             TableView(table: table)
                 .focusable(false)
                 .accessibilityElement(children: .combine)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .centeredReadingColumn(maxWidth: tableWidth)
         case is ThematicBreak:
             Divider()
         default:
@@ -85,7 +124,9 @@ struct BlockView: View {
     private func fontForHeading(_ level: Int, scale: CGFloat) -> Font {
         let baseSizes: [Int: CGFloat] = [1: 28, 2: 22, 3: 19, 4: 17, 5: 16, 6: 15]
         let size = (baseSizes[level] ?? 15) * scale
-        return .system(size: size, weight: .semibold)
+        return fontFamily.isEmpty
+            ? .system(size: size, weight: .semibold)
+            : .custom(fontFamily, size: size).weight(.semibold)
     }
 }
 
@@ -168,24 +209,25 @@ private func stripMathDelimiters(_ s: String) -> String {
 struct MathText: View {
     let raw: String
     @Environment(\.markdownFontScale) private var fontScale
+    @Environment(\.markdownTheme) private var theme
 
     var body: some View {
         let segments = splitMathSegments(raw)
         if segments.count == 1, let only = segments.first, only.isEquation, only.isBlock {
             SwiftUI.Text(only.text)
                 .font(.system(size: 14 * fontScale, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(Color.secondary.opacity(0.08))
+                .background(theme.secondary.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         } else {
             segments.reduce(SwiftUI.Text("")) { partial, segment in
                 if segment.isEquation {
                     return partial + SwiftUI.Text(segment.text)
                         .font(.system(size: 14 * fontScale, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondary)
                 } else {
                     return partial + SwiftUI.Text(segment.text)
                 }
@@ -198,15 +240,21 @@ struct MathText: View {
 struct CodeBlockView: View {
     let codeBlock: CodeBlock
     @Environment(\.markdownFontScale) private var fontScale
-    @State private var mermaidHeight: CGFloat = 160
+    @Environment(\.markdownTheme) private var theme
+    @State private var mermaidHeight: CGFloat = 420
 
-    private let mermaidMaxHeight: CGFloat = 480
+    private let mermaidMaxHeight: CGFloat = 1400
 
     var body: some View {
         if (codeBlock.language ?? "").lowercased() == "mermaid" {
             ScrollView {
-                MermaidView(code: codeBlock.code, height: $mermaidHeight)
-                    .frame(height: mermaidHeight)
+                MermaidView(
+                    code: codeBlock.code,
+                    height: $mermaidHeight,
+                    themeName: theme.mermaidTheme,
+                    themeVariables: theme.mermaidThemeVariables
+                )
+                .frame(height: mermaidHeight)
             }
             .frame(height: min(max(mermaidHeight, 60), mermaidMaxHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -215,6 +263,7 @@ struct CodeBlockView: View {
         } else {
             CodeText(codeBlock.code)
                 .codeTextStyle(.card)
+                .codeTextColors(theme.highlightColors)
                 .font(.system(size: 13 * fontScale, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -224,13 +273,14 @@ struct CodeBlockView: View {
 struct ListView: View {
     let items: [ListItem]
     let ordered: Bool
+    @Environment(\.markdownTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .top, spacing: 6) {
                     SwiftUI.Text(ordered ? "\(index + 1)." : "\u{2022}")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(theme.secondary)
                         .frame(minWidth: 14, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
@@ -245,6 +295,7 @@ struct ListView: View {
 
 struct TableView: View {
     let table: Markdown.Table
+    @Environment(\.markdownTheme) private var theme
 
     private var bodyRows: [Markdown.Table.Row] {
         table.body.children.compactMap { $0 as? Markdown.Table.Row }
@@ -253,7 +304,7 @@ struct TableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TableRowView(cells: Array(table.head.children.compactMap { $0 as? Markdown.Table.Cell }), isHeader: true)
-                .background(Color.secondary.opacity(0.1))
+                .background(theme.tableBorder.opacity(0.1))
 
             ForEach(Array(bodyRows.enumerated()), id: \.offset) { index, row in
                 Divider()
@@ -262,7 +313,7 @@ struct TableView: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                .stroke(theme.tableBorder.opacity(0.3), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -288,6 +339,7 @@ struct TableRowView: View {
 struct InlineText: View {
     let children: [Markup]
     @Environment(\.markdownFontScale) private var fontScale
+    @Environment(\.markdownTheme) private var theme
 
     var body: some View {
         children.reduce(SwiftUI.Text("")) { partial, child in
@@ -311,11 +363,11 @@ struct InlineText: View {
             if let destination = link.destination, let url = URL(string: destination) {
                 var attributed = AttributedString(label)
                 attributed.link = url
-                attributed.foregroundColor = .accentColor
+                attributed.foregroundColor = theme.accent
                 attributed.underlineStyle = .single
                 return SwiftUI.Text(attributed)
             }
-            return SwiftUI.Text(label).foregroundColor(.accentColor).underline()
+            return SwiftUI.Text(label).foregroundColor(theme.accent).underline()
         case is SoftBreak:
             return SwiftUI.Text("\n")
         case is LineBreak:

@@ -5,12 +5,14 @@ import UniformTypeIdentifiers
 @main
 struct FolioApp: App {
     @State private var updateStore = UpdateStore()
+    @State private var settingsStore = SettingsStore()
     @AppStorage("hasSetDefaultMarkdownViewer") private var hasSetDefault = false
 
     var body: some Scene {
         DocumentGroup(newDocument: MarkdownDocument()) { file in
             ContentView(document: file.$document, fileURL: file.fileURL)
                 .environment(updateStore)
+                .environment(settingsStore)
                 .task {
                     await updateStore.checkForUpdatesOnce()
                     setDefaultMarkdownViewerOnce()
@@ -23,6 +25,11 @@ struct FolioApp: App {
                     setAsDefaultMarkdownViewer()
                 }
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environment(settingsStore)
         }
     }
 

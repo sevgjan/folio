@@ -10,6 +10,7 @@ struct ContentView: View {
     @Binding var document: MarkdownDocument
     let fileURL: URL?
     @Environment(UpdateStore.self) private var updateStore
+    @Environment(SettingsStore.self) private var settingsStore
     @State private var zoom: CGFloat = 1.0
     @State private var isPreviewing = true
     @State private var editableTextView: MarkdownTextView?
@@ -19,35 +20,55 @@ struct ContentView: View {
         NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
     }
 
+    private func themedFont(size: CGFloat) -> Font {
+        settingsStore.fontFamily.isEmpty ? .system(size: size) : .custom(settingsStore.fontFamily, size: size)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if updateStore.state != .none {
-                UpdateBannerView(store: updateStore)
-                Divider()
-            }
-
             Group {
                 if isPreviewing {
                     ScrollView {
                         MarkdownRenderer(markdown: document.text)
-                            .font(.system(size: 15 * zoom))
+                            .font(themedFont(size: settingsStore.baseFontSize * zoom))
+                            .foregroundStyle(settingsStore.theme.id == "system" ? Color.primary : settingsStore.theme.foreground)
                             .environment(\.markdownFontScale, zoom)
-                            .padding(32)
+                            .environment(\.markdownTheme, settingsStore.theme)
+                            .environment(\.markdownFontFamily, settingsStore.fontFamily)
+                            .environment(\.markdownReadingWidth, CGFloat(settingsStore.readingWidth))
+                            .environment(\.markdownTableWidth, CGFloat(settingsStore.tableWidth))
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(32)
                             .textSelection(.enabled)
                     }
+                    .background(settingsStore.theme.background)
                     .onTapGesture(count: 3) {
                         isPreviewing = false
                     }
                 } else {
-                    MarkdownEditorView(text: $document.text, fontSize: 16 * zoom) { textView in
+                    MarkdownEditorView(
+                        text: $document.text,
+                        fontSize: (settingsStore.baseFontSize + 1) * zoom,
+                        fontFamily: settingsStore.fontFamily,
+                        theme: settingsStore.theme
+                    ) { textView in
                         DispatchQueue.main.async {
                             editableTextView = textView
                         }
                     }
+                    .background(settingsStore.theme.background)
                 }
             }
+            .background(WindowAppearanceSetter(colorScheme: settingsStore.theme.colorScheme))
         }
+        .overlay(alignment: .top) {
+            if updateStore.state != .none {
+                UpdateBannerView(store: updateStore)
+                    .padding(.top, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: updateStore.state)
         .sheet(item: $tableEditorSession) { session in
             TableEditorSheet(candidates: session.candidates) { edited in
                 for candidate in edited.sorted(by: { $0.range.location > $1.range.location }) {
@@ -152,6 +173,43 @@ struct ContentView: View {
                     ShareLink(item: fileURL)
                 }
             }
+        }
+    }
+}
+
+/// SwiftUI's `.preferredColorScheme(nil)` doesn't reliably revert a window's effective
+/// appearance after a previous non-nil value forced it (a known SwiftUI/AppKit sync bug) —
+/// switching a themed doc back to "System" left the window stuck dark, making `.primary` text
+/// invisible against the now-light background. Setting `NSWindow.appearance` directly instead
+/// is unaffected by that bug: it's a plain AppKit property write, always applied fresh.
+private struct WindowAppearanceSetter: NSViewRepresentable {
+    let colorScheme: ColorScheme?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { apply(to: view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: NSView) {
+        guard let window = view.window else { return }
+        switch colorScheme {
+        case .dark:
+            window.appearance = NSAppearance(named: .darkAqua)
+        case .light:
+            window.appearance = NSAppearance(named: .aqua)
+        default:
+            // Setting `.appearance = nil` (defer to the system) doesn't reliably force AppKit to
+            // re-derive and repaint after a previous explicit assignment — the window can stay
+            // stuck on the old appearance. Assigning an explicit appearance that matches the
+            // current system setting is just as correct and, unlike nil, always triggers a
+            // real change notification.
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
         }
     }
 }
