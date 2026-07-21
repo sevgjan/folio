@@ -21,6 +21,8 @@ targets:
     sources:
       - path: Folio
         type: syncedFolder
+      - path: Shared
+        type: syncedFolder
     info:
       path: Folio/Info.plist
       properties:
@@ -73,6 +75,8 @@ targets:
     sources:
       - path: FolioQuickLook
         type: syncedFolder
+      - path: Shared
+        type: syncedFolder
     info:
       path: FolioQuickLook/Info.plist
       properties:
@@ -99,3 +103,5 @@ targets:
     dependencies:
       - package: SwiftMarkdown
         product: Markdown
+      - package: HighlightSwift
+        product: HighlightSwift

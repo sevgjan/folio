@@ -9,6 +9,8 @@ final class PreviewProvider: NSViewController, @MainActor QLPreviewingController
         hostingView = NSHostingView(rootView: AnyView(EmptyView()))
         hostingView.frame = NSRect(x: 0, y: 0, width: 820, height: 1040)
         view = hostingView
+        // quicklookd sizes the preview panel from this, not from the view's own frame.
+        preferredContentSize = hostingView.frame.size
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
