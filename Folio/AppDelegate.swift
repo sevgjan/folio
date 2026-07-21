@@ -7,4 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         false
     }
+
+    // Suppressing the untitled document above also skips the code path that normally
+    // activates the app on launch, so the Welcome window can open behind other apps
+    // (or not come forward) until you click the Dock icon a second time.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
