@@ -22,6 +22,13 @@ private struct MarkdownTableWidthKey: EnvironmentKey {
     static let defaultValue: CGFloat = CGFloat(SettingsStore.Defaults.readingWidth * SettingsStore.Defaults.tableWidthRatio)
 }
 
+/// Mermaid rendering loads mermaid.js from a CDN, which requires network access. The app
+/// is unsandboxed so this is fine, but the sandboxed Quick Look extension has no network
+/// entitlement, so it sets this to false and falls back to a plain code block.
+private struct MarkdownMermaidEnabledKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
 extension EnvironmentValues {
     var markdownFontScale: CGFloat {
         get { self[MarkdownFontScaleKey.self] }
@@ -42,6 +49,10 @@ extension EnvironmentValues {
     var markdownTableWidth: CGFloat {
         get { self[MarkdownTableWidthKey.self] }
         set { self[MarkdownTableWidthKey.self] = newValue }
+    }
+    var markdownMermaidEnabled: Bool {
+        get { self[MarkdownMermaidEnabledKey.self] }
+        set { self[MarkdownMermaidEnabledKey.self] = newValue }
     }
 }
 
@@ -72,6 +83,7 @@ struct BlockView: View {
     @Environment(\.markdownFontFamily) private var fontFamily
     @Environment(\.markdownReadingWidth) private var readingWidth
     @Environment(\.markdownTableWidth) private var tableWidth
+    @Environment(\.markdownMermaidEnabled) private var mermaidEnabled
 
     var body: some View {
         switch block {
@@ -84,7 +96,7 @@ struct BlockView: View {
             ParagraphView(paragraph: paragraph)
                 .centeredReadingColumn(maxWidth: readingWidth)
         case let codeBlock as CodeBlock:
-            if (codeBlock.language ?? "").lowercased() == "mermaid" {
+            if (codeBlock.language ?? "").lowercased() == "mermaid" && mermaidEnabled {
                 CodeBlockView(codeBlock: codeBlock)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -241,12 +253,13 @@ struct CodeBlockView: View {
     let codeBlock: CodeBlock
     @Environment(\.markdownFontScale) private var fontScale
     @Environment(\.markdownTheme) private var theme
+    @Environment(\.markdownMermaidEnabled) private var mermaidEnabled
     @State private var mermaidHeight: CGFloat = 420
 
     private let mermaidMaxHeight: CGFloat = 1400
 
     var body: some View {
-        if (codeBlock.language ?? "").lowercased() == "mermaid" {
+        if (codeBlock.language ?? "").lowercased() == "mermaid" && mermaidEnabled {
             ScrollView {
                 MermaidView(
                     code: codeBlock.code,
