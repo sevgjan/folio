@@ -96,7 +96,14 @@ struct WelcomeView: View {
         .foregroundStyle(isSystemTheme ? Color.primary : theme.foreground)
         .background(isSystemTheme ? Color(nsColor: .windowBackgroundColor) : theme.background)
         .background(WindowAppearanceSetter(colorScheme: theme.colorScheme))
-        .background(WindowCapture { selfWindow = $0 })
+        .background(WindowCapture { window in
+            selfWindow = window
+            // SwiftUI can materialize this window after applicationDidFinishLaunching already
+            // fired, so activating there has nothing to bring forward yet. Doing it here, right
+            // when the window actually exists, is what reliably raises it on a cold launch.
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        })
         .onAppear(perform: loadRecents)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { note in
             guard let window = note.object as? NSWindow, window !== selfWindow else { return }
