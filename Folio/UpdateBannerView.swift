@@ -48,7 +48,7 @@ struct UpdateBannerView: View {
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: Capsule())
+        .glassPanel(in: Capsule())
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.2), radius: 14, y: 6)
         .fixedSize()

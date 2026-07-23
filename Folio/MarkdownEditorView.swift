@@ -7,6 +7,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     var fontFamily: String = ""
     var theme: Theme = .system
     var onTextViewReady: (MarkdownTextView) -> Void = { _ in }
+    var onSelectionChange: (Int, Int) -> Void = { _, _ in }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = MarkdownTextView()
@@ -60,14 +61,16 @@ struct MarkdownEditorView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, onSelectionChange: onSelectionChange)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var onSelectionChange: (Int, Int) -> Void
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, onSelectionChange: @escaping (Int, Int) -> Void) {
             self.text = text
+            self.onSelectionChange = onSelectionChange
         }
 
         func textDidChange(_ notification: Notification) {
@@ -79,6 +82,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
             textView.handleSelectionChange()
+            onSelectionChange(textView.selectedRange().location, textView.textStorage?.length ?? 0)
         }
     }
 }

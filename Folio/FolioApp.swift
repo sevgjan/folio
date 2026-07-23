@@ -74,27 +74,31 @@ private struct WelcomeMenuButton: View {
     }
 }
 
-/// The editor is a plain NSTextView, which already implements find/replace via the modern
-/// find bar (NSTextFinder) — it just needs menu items wired to `performFindPanelAction(_:)`
-/// with the right tag, the same way AppKit apps have exposed Find since forever. Declaring
-/// these through SwiftUI's own Commands (rather than mutating NSApp.mainMenu directly) avoids
-/// a race where SwiftUI rebuilds the Edit menu after launch and silently drops manual edits.
+// Routes ⌘F/G to the editor's NSTextView find bar, and also broadcasts a notification ContentView uses to drive the preview find bar (kept to one ⌘F binding to avoid shortcut collisions).
 private struct FindMenuButtons: View {
     var body: some View {
         Divider()
-        Button("Find…") { performFind(.showFindInterface) }
+        Button("Find…") { performFind(.showFindInterface, notification: .folioFindShow) }
             .keyboardShortcut("f", modifiers: .command)
-        Button("Find Next") { performFind(.nextMatch) }
+        Button("Find Next") { performFind(.nextMatch, notification: .folioFindNext) }
             .keyboardShortcut("g", modifiers: .command)
-        Button("Find Previous") { performFind(.previousMatch) }
+        Button("Find Previous") { performFind(.previousMatch, notification: .folioFindPrevious) }
             .keyboardShortcut("g", modifiers: [.command, .shift])
         // No keyboard shortcut: ⌘E is already Folio's Preview/Edit toggle.
-        Button("Use Selection for Find") { performFind(.setSearchString) }
+        Button("Use Selection for Find") { performFind(.setSearchString, notification: .folioFindSetSelection) }
     }
 
-    private func performFind(_ action: NSTextFinder.Action) {
+    private func performFind(_ action: NSTextFinder.Action, notification: Notification.Name) {
         let sender = NSMenuItem()
         sender.tag = action.rawValue
         NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: sender)
+        NotificationCenter.default.post(name: notification, object: nil)
     }
+}
+
+extension Notification.Name {
+    static let folioFindShow = Notification.Name("folioFindShow")
+    static let folioFindNext = Notification.Name("folioFindNext")
+    static let folioFindPrevious = Notification.Name("folioFindPrevious")
+    static let folioFindSetSelection = Notification.Name("folioFindSetSelection")
 }

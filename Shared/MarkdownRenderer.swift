@@ -29,6 +29,10 @@ private struct MarkdownMermaidEnabledKey: EnvironmentKey {
     static let defaultValue: Bool = true
 }
 
+private struct MarkdownHighlightBlockIDKey: EnvironmentKey {
+    static let defaultValue: Int? = nil
+}
+
 extension EnvironmentValues {
     var markdownFontScale: CGFloat {
         get { self[MarkdownFontScaleKey.self] }
@@ -54,6 +58,10 @@ extension EnvironmentValues {
         get { self[MarkdownMermaidEnabledKey.self] }
         set { self[MarkdownMermaidEnabledKey.self] = newValue }
     }
+    var markdownHighlightBlockID: Int? {
+        get { self[MarkdownHighlightBlockIDKey.self] }
+        set { self[MarkdownHighlightBlockIDKey.self] = newValue }
+    }
 }
 
 extension View {
@@ -65,72 +73,97 @@ extension View {
 
 struct MarkdownRenderer: View {
     let markdown: String
+    @State private var cache: (text: String, document: Markdown.Document)
+
+    init(markdown: String) {
+        self.markdown = markdown
+        self._cache = State(initialValue: (markdown, Markdown.Document(parsing: markdown)))
+    }
+
+    // Re-renders can happen for reasons unrelated to the text (e.g. find-highlight color
+    // changes on every next/previous click) — reparsing markdown every time made those laggy.
+    private var document: Markdown.Document {
+        cache.text == markdown ? cache.document : Markdown.Document(parsing: markdown)
+    }
 
     var body: some View {
-        let document = Markdown.Document(parsing: markdown)
         VStack(alignment: .leading, spacing: 22) {
-            ForEach(Array(document.children.enumerated()), id: \.offset) { _, block in
-                BlockView(block: block)
+            ForEach(Array(document.children.enumerated()), id: \.offset) { offset, block in
+                BlockView(block: block, offset: offset)
             }
+        }
+        .scrollTargetLayout()
+        .task(id: markdown) {
+            if cache.text != markdown { cache = (markdown, Markdown.Document(parsing: markdown)) }
         }
     }
 }
 
 struct BlockView: View {
     let block: Markup
+    var offset: Int = 0
     @Environment(\.markdownFontScale) private var fontScale
     @Environment(\.markdownTheme) private var theme
     @Environment(\.markdownFontFamily) private var fontFamily
     @Environment(\.markdownReadingWidth) private var readingWidth
     @Environment(\.markdownTableWidth) private var tableWidth
     @Environment(\.markdownMermaidEnabled) private var mermaidEnabled
+    @Environment(\.markdownHighlightBlockID) private var highlightBlockID
+
+    private var highlightBackground: Color {
+        highlightBlockID == offset ? Color.yellow.opacity(0.15) : Color.clear
+    }
 
     var body: some View {
-        switch block {
-        case let heading as Heading:
-            InlineText(children: Array(heading.children))
-                .font(fontForHeading(heading.level, scale: fontScale))
-                .padding(.top, 20 * fontScale)
+        Group {
+            switch block {
+            case let heading as Heading:
+                InlineText(children: Array(heading.children))
+                    .font(fontForHeading(heading.level, scale: fontScale))
+                    .padding(.top, 20 * fontScale)
+                    .centeredReadingColumn(maxWidth: readingWidth)
+            case let paragraph as Paragraph:
+                ParagraphView(paragraph: paragraph)
+                    .centeredReadingColumn(maxWidth: readingWidth)
+            case let codeBlock as CodeBlock:
+                if (codeBlock.language ?? "").lowercased() == "mermaid" && mermaidEnabled {
+                    CodeBlockView(codeBlock: codeBlock)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    CodeBlockView(codeBlock: codeBlock)
+                        .centeredReadingColumn(maxWidth: readingWidth)
+                }
+            case let list as UnorderedList:
+                ListView(items: Array(list.children.compactMap { $0 as? ListItem }), ordered: false)
+                    .centeredReadingColumn(maxWidth: readingWidth)
+            case let list as OrderedList:
+                ListView(items: Array(list.children.compactMap { $0 as? ListItem }), ordered: true)
+                    .centeredReadingColumn(maxWidth: readingWidth)
+            case let quote as BlockQuote:
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(quote.children.enumerated()), id: \.offset) { _, child in
+                        BlockView(block: child)
+                    }
+                }
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(theme.secondary).frame(width: 3)
+                }
                 .centeredReadingColumn(maxWidth: readingWidth)
-        case let paragraph as Paragraph:
-            ParagraphView(paragraph: paragraph)
-                .centeredReadingColumn(maxWidth: readingWidth)
-        case let codeBlock as CodeBlock:
-            if (codeBlock.language ?? "").lowercased() == "mermaid" && mermaidEnabled {
-                CodeBlockView(codeBlock: codeBlock)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                CodeBlockView(codeBlock: codeBlock)
+            case let table as Markdown.Table:
+                TableView(table: table)
+                    .focusable(false)
+                    .accessibilityElement(children: .combine)
+                    .centeredReadingColumn(maxWidth: tableWidth)
+            case is ThematicBreak:
+                Divider()
+            default:
+                InlineText(children: [block])
                     .centeredReadingColumn(maxWidth: readingWidth)
             }
-        case let list as UnorderedList:
-            ListView(items: Array(list.children.compactMap { $0 as? ListItem }), ordered: false)
-                .centeredReadingColumn(maxWidth: readingWidth)
-        case let list as OrderedList:
-            ListView(items: Array(list.children.compactMap { $0 as? ListItem }), ordered: true)
-                .centeredReadingColumn(maxWidth: readingWidth)
-        case let quote as BlockQuote:
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(quote.children.enumerated()), id: \.offset) { _, child in
-                    BlockView(block: child)
-                }
-            }
-            .padding(.leading, 12)
-            .overlay(alignment: .leading) {
-                Rectangle().fill(theme.secondary).frame(width: 3)
-            }
-            .centeredReadingColumn(maxWidth: readingWidth)
-        case let table as Markdown.Table:
-            TableView(table: table)
-                .focusable(false)
-                .accessibilityElement(children: .combine)
-                .centeredReadingColumn(maxWidth: tableWidth)
-        case is ThematicBreak:
-            Divider()
-        default:
-            InlineText(children: [block])
-                .centeredReadingColumn(maxWidth: readingWidth)
         }
+        .id(offset)
+        .background(highlightBackground)
     }
 
     private func fontForHeading(_ level: Int, scale: CGFloat) -> Font {

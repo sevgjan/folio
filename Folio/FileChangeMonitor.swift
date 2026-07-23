@@ -1,10 +1,6 @@
 import Foundation
 
-/// FileDocument/DocumentGroup only reads the file once, on open — it has no built-in
-/// awareness of the file changing on disk afterward. Editing the same file in another
-/// app (VS Code, etc.) previously required closing and reopening the Folio window to
-/// see the update. This registers as an NSFilePresenter so macOS notifies us whenever
-/// the file is modified externally, and reloads it into the document automatically.
+// Watches the open file for external edits (e.g. from VS Code) and reloads it into the document.
 final class FileChangeMonitor: NSObject, NSFilePresenter {
     let presentedItemURL: URL?
     let presentedItemOperationQueue = OperationQueue.main
