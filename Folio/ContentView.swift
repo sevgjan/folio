@@ -9,7 +9,6 @@ private struct TableEditorSession: Identifiable {
 // NavigationSplitView + .listStyle(.sidebar) is the real native sidebar container, materials included.
 private struct OutlineSidebarView: View {
     let headings: [HeadingItem]
-    let currentHeadingID: Int?
     let onSelect: (Int) -> Void
 
     var body: some View {
@@ -20,22 +19,13 @@ private struct OutlineSidebarView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(headings) { heading in
-                    let isCurrent = heading.id == currentHeadingID
                     Button {
                         onSelect(heading.id)
                     } label: {
                         Text(heading.title)
-                            .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
-                            .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
+                            .font(.system(size: 13))
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 2)
-                            .padding(.horizontal, 6)
-                            .background {
-                                if isCurrent {
-                                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
-                                }
-                            }
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, CGFloat(max(0, heading.level - 1)) * 12)
@@ -61,8 +51,8 @@ struct ContentView: View {
     @State private var isFindBarVisible = false
     @State private var findState = FindState()
     @State private var scrollTarget: Int?
-    @State private var scrollProgress: Double = 0
-    @State private var visibleBlockID: Int?
+    @State private var scrollTracker = ScrollProgressTracker()
+    @State private var headings: [HeadingItem] = []
     @State private var editCursorLocation: Int = 0
     @State private var editTextLength: Int = 0
 
@@ -109,16 +99,9 @@ struct ContentView: View {
         }
     }
 
-    private func currentHeadingID(in headings: [HeadingItem]) -> Int? {
-        guard let visibleBlockID else { return nil }
-        return headings.last(where: { $0.id <= visibleBlockID })?.id
-    }
-
     var body: some View {
-        let headings = HeadingParser.parse(document.text)
-
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            OutlineSidebarView(headings: headings, currentHeadingID: currentHeadingID(in: headings)) { blockID in
+            OutlineSidebarView(headings: headings) { blockID in
                 // Jumping from the outline always switches to preview — there's nothing to scroll to in edit mode.
                 if !isPreviewing { isPreviewing = true }
                 scrollTarget = blockID
@@ -142,9 +125,8 @@ struct ContentView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(32)
                                     .textSelection(.enabled)
-                                    .background(ScrollPositionObserver { progress in scrollProgress = progress })
+                                    .background(ScrollPositionObserver { progress in scrollTracker.progress = progress })
                             }
-                            .scrollPosition(id: $visibleBlockID, anchor: .top)
                             .background(settingsStore.theme.background)
                             .onTapGesture(count: 3) {
                                 isPreviewing = false
@@ -191,7 +173,9 @@ struct ContentView: View {
                 StatusBarView(
                     wordCount: wordCount,
                     characterCount: characterCount,
-                    progress: isPreviewing ? scrollProgress : editProgress
+                    isPreviewing: isPreviewing,
+                    scrollTracker: scrollTracker,
+                    editProgress: editProgress
                 )
             }
         }
@@ -205,11 +189,13 @@ struct ContentView: View {
         .animation(.spring(duration: 0.3), value: updateStore.state)
         .onAppear {
             startFileMonitoring()
+            headings = HeadingParser.parse(document.text)
             if isPreviewing {
                 findState.setContext(text: document.text, blockRanges: HeadingParser.blockRanges(in: document.text))
             }
         }
         .onChange(of: document.text) { _, newText in
+            headings = HeadingParser.parse(newText)
             guard isPreviewing else { return }
             findState.setContext(text: newText, blockRanges: HeadingParser.blockRanges(in: newText))
         }

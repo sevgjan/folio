@@ -1,6 +1,15 @@
 import AppKit
 import SwiftUI
 
+// @Observable, not @State on the caller's side: boundsDidChangeNotification fires continuously
+// during a scroll gesture, and a plain @State var read by the caller's own body would force the
+// whole view (sidebar, markdown tree, toolbar, everything) to re-render on every single tick.
+// Only views that actually read `.progress` — i.e. just StatusBarView — get invalidated this way.
+@Observable
+final class ScrollProgressTracker {
+    var progress: Double = 0
+}
+
 /// SwiftUI's ScrollView on macOS exposes no scroll-offset API, so this bridges to the
 /// underlying NSScrollView and reports reading progress as its bounds change. Place it
 /// anywhere inside the scrolling content; it walks up the view hierarchy to find the

@@ -92,7 +92,6 @@ struct MarkdownRenderer: View {
                 BlockView(block: block, offset: offset)
             }
         }
-        .scrollTargetLayout()
         .task(id: markdown) {
             if cache.text != markdown { cache = (markdown, Markdown.Document(parsing: markdown)) }
         }
