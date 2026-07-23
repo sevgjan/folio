@@ -15,6 +15,8 @@ struct ContentView: View {
     @State private var isPreviewing: Bool
     @State private var editableTextView: MarkdownTextView?
     @State private var tableEditorSession: TableEditorSession?
+    @State private var fileMonitor: FileChangeMonitor?
+    @State private var lastKnownDiskText: String?
 
     init(document: Binding<MarkdownDocument>, fileURL: URL?) {
         self._document = document
@@ -30,6 +32,19 @@ struct ContentView: View {
 
     private func themedFont(size: CGFloat) -> Font {
         settingsStore.fontFamily.isEmpty ? .system(size: size) : .custom(settingsStore.fontFamily, size: size)
+    }
+
+    private func startFileMonitoring() {
+        guard let fileURL else { return }
+        lastKnownDiskText = document.text
+        fileMonitor = FileChangeMonitor(fileURL: fileURL) { newText in
+            // Only auto-reload if the in-app text hasn't diverged from what we last
+            // knew to be on disk — otherwise an external change would silently
+            // overwrite edits the user is actively making in Folio.
+            guard document.text == lastKnownDiskText, newText != document.text else { return }
+            document.text = newText
+            lastKnownDiskText = newText
+        }
     }
 
     var body: some View {
@@ -77,6 +92,11 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: updateStore.state)
+        .onAppear { startFileMonitoring() }
+        .onReceive(NotificationCenter.default.publisher(for: .markdownDocumentDidSave)) { note in
+            guard let text = note.userInfo?["text"] as? String, text == document.text else { return }
+            lastKnownDiskText = text
+        }
         .sheet(item: $tableEditorSession) { session in
             TableEditorSheet(candidates: session.candidates) { edited in
                 for candidate in edited.sorted(by: { $0.range.location > $1.range.location }) {

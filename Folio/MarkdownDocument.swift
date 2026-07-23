@@ -25,6 +25,10 @@ struct MarkdownDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: Data(text.utf8))
+        let savedText = text
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .markdownDocumentDidSave, object: nil, userInfo: ["text": savedText])
+        }
+        return FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
