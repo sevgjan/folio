@@ -9,7 +9,15 @@ private struct TableEditorSession: Identifiable {
 // NavigationSplitView + .listStyle(.sidebar) is the real native sidebar container, materials included.
 private struct OutlineSidebarView: View {
     let headings: [HeadingItem]
+    let visibleBlockTracker: VisibleBlockTracker
     let onSelect: (Int) -> Void
+
+    // Reading visibleBlockTracker.blockID here (not in ContentView) keeps the scroll-driven
+    // dependency local to this view — see VisibleBlockTracker's comment.
+    private var currentHeadingID: Int? {
+        guard let blockID = visibleBlockTracker.blockID else { return nil }
+        return headings.last(where: { $0.id <= blockID })?.id
+    }
 
     var body: some View {
         List {
@@ -19,13 +27,22 @@ private struct OutlineSidebarView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(headings) { heading in
+                    let isCurrent = heading.id == currentHeadingID
                     Button {
                         onSelect(heading.id)
                     } label: {
                         Text(heading.title)
-                            .font(.system(size: 13))
+                            .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
+                            .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
+                            .padding(.horizontal, 6)
+                            .background {
+                                if isCurrent {
+                                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
+                                }
+                            }
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, CGFloat(max(0, heading.level - 1)) * 12)
@@ -52,6 +69,7 @@ struct ContentView: View {
     @State private var findState = FindState()
     @State private var scrollTarget: Int?
     @State private var scrollTracker = ScrollProgressTracker()
+    @State private var visibleBlockTracker = VisibleBlockTracker()
     @State private var headings: [HeadingItem] = []
     @State private var editCursorLocation: Int = 0
     @State private var editTextLength: Int = 0
@@ -101,7 +119,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            OutlineSidebarView(headings: headings) { blockID in
+            OutlineSidebarView(headings: headings, visibleBlockTracker: visibleBlockTracker) { blockID in
                 // Jumping from the outline always switches to preview — there's nothing to scroll to in edit mode.
                 if !isPreviewing { isPreviewing = true }
                 scrollTarget = blockID
@@ -121,12 +139,19 @@ struct ContentView: View {
                                     .environment(\.markdownFontFamily, settingsStore.fontFamily)
                                     .environment(\.markdownReadingWidth, CGFloat(settingsStore.readingWidth))
                                     .environment(\.markdownTableWidth, CGFloat(settingsStore.tableWidth))
-                                    .environment(\.markdownHighlightBlockID, findState.highlightedBlockID)
+                                    .environment(\.markdownHighlightQuery, isFindBarVisible ? findState.query : nil)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(32)
                                     .textSelection(.enabled)
                                     .background(ScrollPositionObserver { progress in scrollTracker.progress = progress })
                             }
+                            .scrollPosition(
+                                id: Binding(
+                                    get: { visibleBlockTracker.blockID },
+                                    set: { visibleBlockTracker.blockID = $0 }
+                                ),
+                                anchor: .top
+                            )
                             .background(settingsStore.theme.background)
                             .onTapGesture(count: 3) {
                                 isPreviewing = false

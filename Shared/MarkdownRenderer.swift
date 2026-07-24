@@ -29,8 +29,8 @@ private struct MarkdownMermaidEnabledKey: EnvironmentKey {
     static let defaultValue: Bool = true
 }
 
-private struct MarkdownHighlightBlockIDKey: EnvironmentKey {
-    static let defaultValue: Int? = nil
+private struct MarkdownHighlightQueryKey: EnvironmentKey {
+    static let defaultValue: String? = nil
 }
 
 extension EnvironmentValues {
@@ -58,9 +58,9 @@ extension EnvironmentValues {
         get { self[MarkdownMermaidEnabledKey.self] }
         set { self[MarkdownMermaidEnabledKey.self] = newValue }
     }
-    var markdownHighlightBlockID: Int? {
-        get { self[MarkdownHighlightBlockIDKey.self] }
-        set { self[MarkdownHighlightBlockIDKey.self] = newValue }
+    var markdownHighlightQuery: String? {
+        get { self[MarkdownHighlightQueryKey.self] }
+        set { self[MarkdownHighlightQueryKey.self] = newValue }
     }
 }
 
@@ -92,6 +92,7 @@ struct MarkdownRenderer: View {
                 BlockView(block: block, offset: offset)
             }
         }
+        .scrollTargetLayout()
         .task(id: markdown) {
             if cache.text != markdown { cache = (markdown, Markdown.Document(parsing: markdown)) }
         }
@@ -107,11 +108,6 @@ struct BlockView: View {
     @Environment(\.markdownReadingWidth) private var readingWidth
     @Environment(\.markdownTableWidth) private var tableWidth
     @Environment(\.markdownMermaidEnabled) private var mermaidEnabled
-    @Environment(\.markdownHighlightBlockID) private var highlightBlockID
-
-    private var highlightBackground: Color {
-        highlightBlockID == offset ? Color.yellow.opacity(0.15) : Color.clear
-    }
 
     var body: some View {
         Group {
@@ -162,7 +158,6 @@ struct BlockView: View {
             }
         }
         .id(offset)
-        .background(highlightBackground)
     }
 
     private func fontForHeading(_ level: Int, scale: CGFloat) -> Font {
@@ -396,6 +391,7 @@ struct InlineText: View {
     let children: [Markup]
     @Environment(\.markdownFontScale) private var fontScale
     @Environment(\.markdownTheme) private var theme
+    @Environment(\.markdownHighlightQuery) private var highlightQuery
 
     var body: some View {
         children.reduce(SwiftUI.Text("")) { partial, child in
@@ -404,16 +400,34 @@ struct InlineText: View {
         .lineSpacing(6 * fontScale)
     }
 
+    // Only the matched substring gets a background, not the whole surrounding block.
+    private func highlighted(_ string: String) -> SwiftUI.Text {
+        guard let highlightQuery, !highlightQuery.isEmpty,
+              let regex = try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: highlightQuery), options: .caseInsensitive) else {
+            return SwiftUI.Text(string)
+        }
+        let nsRange = NSRange(location: 0, length: (string as NSString).length)
+        let matches = regex.matches(in: string, range: nsRange)
+        guard !matches.isEmpty else { return SwiftUI.Text(string) }
+
+        var attributed = AttributedString(string)
+        for match in matches {
+            guard let range = Range(match.range, in: attributed) else { continue }
+            attributed[range].backgroundColor = .yellow
+        }
+        return SwiftUI.Text(attributed)
+    }
+
     private func inlineText(for node: Markup) -> SwiftUI.Text {
         switch node {
         case let text as Markdown.Text:
-            return SwiftUI.Text(text.string)
+            return highlighted(text.string)
         case let emphasis as Emphasis:
             return emphasis.children.reduce(SwiftUI.Text("")) { $0 + inlineText(for: $1) }.italic()
         case let strong as Strong:
             return strong.children.reduce(SwiftUI.Text("")) { $0 + inlineText(for: $1) }.bold()
         case let code as InlineCode:
-            return SwiftUI.Text(code.code).font(.system(size: 14 * fontScale, design: .monospaced))
+            return highlighted(code.code).font(.system(size: 14 * fontScale, design: .monospaced))
         case let link as Markdown.Link:
             let label = plainString(link)
             if let destination = link.destination, let url = URL(string: destination) {

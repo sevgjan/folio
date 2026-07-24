@@ -10,6 +10,13 @@ final class ScrollProgressTracker {
     var progress: Double = 0
 }
 
+// Same isolation reasoning as above, for the outline sidebar's "current section" highlight:
+// only OutlineSidebarView should re-render when the visible block changes, not ContentView.
+@Observable
+final class VisibleBlockTracker {
+    var blockID: Int?
+}
+
 /// SwiftUI's ScrollView on macOS exposes no scroll-offset API, so this bridges to the
 /// underlying NSScrollView and reports reading progress as its bounds change. Place it
 /// anywhere inside the scrolling content; it walks up the view hierarchy to find the
