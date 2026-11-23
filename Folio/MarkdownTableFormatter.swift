@@ -5,7 +5,7 @@ enum MarkdownTableFormatter {
         case left, right, center
     }
 
-    struct ParsedTable {
+    struct ParsedTable: Equatable {
         var rows: [[String]]
         var alignments: [ColumnAlignment]
     }
@@ -16,19 +16,43 @@ enum MarkdownTableFormatter {
     }
 
     static func parse(_ block: String) -> ParsedTable? {
-        let lines = block.components(separatedBy: "\n")
+        let lines = block.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline).map(String.init)
         guard lines.count >= 2 else { return nil }
 
         let allRows = lines.map(parseRow)
         guard let separatorRow = allRows[safe: 1], isSeparatorRow(separatorRow) else { return nil }
 
         let columnCount = allRows[0].count
-        guard columnCount > 0 else { return nil }
+        guard columnCount > 0, separatorRow.count == columnCount,
+              allRows.allSatisfy({ $0.count <= columnCount }) else { return nil }
 
         let alignments = (0..<columnCount).map { columnAlignment(for: separatorRow[safe: $0] ?? "---") }
         let dataRows = allRows.enumerated().filter { $0.offset != 1 }.map { padRow($0.element, to: columnCount) }
 
         return ParsedTable(rows: dataRows, alignments: alignments)
+    }
+
+    static func replacements(in raw: String, at location: Int, with table: ParsedTable) -> [MarkdownReplacement] {
+        guard let original = parse(raw), original != table else { return [] }
+        let source = raw as NSString
+        var lines: [NSRange] = []
+        source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byLines) { _, range, _, _ in
+            if range.length > 0 { lines.append(range) }
+        }
+        let updated = serialize(table).components(separatedBy: "\n")
+        if original.rows.count == table.rows.count, original.alignments == table.alignments,
+           lines.count == updated.count {
+            return table.rows.indices.compactMap { index in
+                guard original.rows[index] != table.rows[index] else { return nil }
+                let line = lines[index == 0 ? 0 : index + 1]
+                return MarkdownReplacement(range: NSRange(location: location + line.location, length: line.length),
+                                           text: updated[index == 0 ? 0 : index + 1])
+            }
+        }
+        guard let last = lines.last else { return [] }
+        let newline = raw.contains("\r\n") ? "\r\n" : (raw.contains("\r") ? "\r" : "\n")
+        return [MarkdownReplacement(range: NSRange(location: location, length: NSMaxRange(last)),
+                                    text: updated.joined(separator: newline))]
     }
 
     static func serialize(_ table: ParsedTable) -> String {
@@ -67,7 +91,17 @@ enum MarkdownTableFormatter {
         if trimmed.hasSuffix("|") {
             trimmed.removeLast()
         }
-        return trimmed.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        var cells = [""]
+        var escaped = false
+        for character in trimmed {
+            if character == "|" && !escaped {
+                cells.append("")
+            } else {
+                cells[cells.count - 1].append(character)
+            }
+            escaped = character == "\\" && !escaped
+        }
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     private static func isSeparatorRow(_ cells: [String]) -> Bool {
@@ -88,7 +122,14 @@ enum MarkdownTableFormatter {
 
     private static func formatDataRow(_ row: [String], widths: [Int], alignments: [ColumnAlignment], columnCount: Int) -> String {
         let cells = (0..<columnCount).map { column -> String in
-            let content = row[safe: column] ?? ""
+            let value = row[safe: column] ?? ""
+            var content = ""
+            var escaped = false
+            for character in value {
+                if character == "|" && !escaped { content.append("\\") }
+                content.append(character)
+                escaped = character == "\\" && !escaped
+            }
             return pad(content, to: widths[column], alignment: alignments[column])
         }
         return "| " + cells.joined(separator: " | ") + " |"

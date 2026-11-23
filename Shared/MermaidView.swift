@@ -15,11 +15,13 @@ struct MermaidView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let contentController = WKUserContentController()
         contentController.add(context.coordinator, name: "heightHandler")
+        MarkdownWebAssets.install(MarkdownWebAssets.mermaid, in: contentController)
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
 
         let webView = NonFocusableWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
+        webView.navigationDelegate = context.coordinator
         context.coordinator.lastCode = code
         context.coordinator.lastTheme = themeName
         load(in: webView)
@@ -33,6 +35,11 @@ struct MermaidView: NSViewRepresentable {
         load(in: webView)
     }
 
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "heightHandler")
+        view.stopLoading()
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(height: $height)
     }
@@ -42,7 +49,7 @@ struct MermaidView: NSViewRepresentable {
             ? (NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "default")
             : themeName
 
-        var initializeOptions = "{ startOnLoad: true, theme: \"\(resolvedTheme)\""
+        var initializeOptions = "{ startOnLoad: false, securityLevel: \"strict\", suppressErrorRendering: true, theme: \"\(resolvedTheme)\""
         if let themeVariables, !themeVariables.isEmpty {
             let variables = themeVariables.map { "\"\($0.key)\": \"\($0.value)\"" }.joined(separator: ", ")
             initializeOptions += ", themeVariables: { \(variables) }"
@@ -54,7 +61,7 @@ struct MermaidView: NSViewRepresentable {
         <html>
         <head>
         <meta charset="utf-8">
-        <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
         <style>
         html, body { margin: 0; padding: 8px; background: transparent; }
         .mermaid svg { width: 100%; max-width: none; height: auto; }
@@ -63,16 +70,21 @@ struct MermaidView: NSViewRepresentable {
         <body>
         <pre class="mermaid">\(htmlEscape(code))</pre>
         <script>
-        mermaid.initialize(\(initializeOptions));
-        var attempts = 0;
-        var timer = setInterval(function () {
-          attempts++;
-          var svg = document.querySelector('.mermaid svg');
-          if (svg || attempts > 100) {
-            clearInterval(timer);
-            window.webkit.messageHandlers.heightHandler.postMessage(document.body.scrollHeight);
+        const target = document.querySelector('.mermaid');
+        async function render() {
+          try {
+            mermaid.initialize(\(initializeOptions));
+            await mermaid.run({nodes: [target]});
+          } catch {
+            const note = document.createElement('p');
+            note.textContent = 'Diagram could not be rendered';
+            target.before(note);
           }
-        }, 50);
+          new ResizeObserver(() => {
+            window.webkit.messageHandlers.heightHandler.postMessage(document.body.getBoundingClientRect().height);
+          }).observe(document.body);
+        }
+        render();
         </script>
         </body>
         </html>
@@ -87,13 +99,17 @@ struct MermaidView: NSViewRepresentable {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var height: Binding<CGFloat>
         var lastCode: String?
         var lastTheme: String?
 
         init(height: Binding<CGFloat>) {
             self.height = height
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+            action.request.url?.absoluteString == "about:blank" ? .allow : .cancel
         }
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {

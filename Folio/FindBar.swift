@@ -15,7 +15,7 @@ struct FindBar: View {
                 .frame(width: 220)
                 .focused($isFocused)
 
-            if !state.matches.isEmpty {
+            if !state.normalizedQuery.isEmpty {
                 Text(state.matchDescription)
                     .foregroundStyle(.secondary)
                     .font(.callout)

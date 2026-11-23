@@ -29,8 +29,8 @@ command -v xcodegen >/dev/null || {
 cd "$PROJECT_DIR"
 xcodegen generate
 
-rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
+BUILD_DIR="$(mktemp -d "$BUILD_DIR/$VERSION.XXXXXX")"
 
 xcodebuild \
   -project "$PROJECT_DIR/${APP_NAME}.xcodeproj" \
@@ -48,17 +48,13 @@ APP_STAGED="$STAGED_DIR/${APP_NAME}.app"
 mkdir -p "$STAGED_DIR"
 cp -R "$APP_SRC" "$APP_STAGED"
 
-# Ad-hoc sign so macOS has a consistent code signature. Does NOT bypass Gatekeeper
-# (that needs a paid Apple Developer ID + notarization); it just gives the bundle a signature.
-# Sign inside-out with explicit --entitlements per bundle: `--deep` alone re-signs nested
-# bundles but without entitlements, which drops FolioQuickLook's sandbox entitlement and
-# makes PlugInKit reject it ("plug-ins must be sandboxed"), silently breaking Quick Look.
-codesign --force --sign - \
+IDENTITY="Developer ID Application: Rolling Rabbits Sh.p.k (Q4FVJUH2ZJ)"
+codesign --force --timestamp --options runtime --sign "$IDENTITY" \
   --entitlements "$PROJECT_DIR/FolioQuickLook/FolioQuickLook.entitlements" \
   "$APP_STAGED/Contents/PlugIns/FolioQuickLook.appex"
-codesign --force --sign - \
-  --entitlements "$PROJECT_DIR/Folio/Folio.entitlements" \
-  "$APP_STAGED"
+codesign --force --timestamp --options runtime --sign "$IDENTITY" \
+  --entitlements "$PROJECT_DIR/Folio/Folio.entitlements" "$APP_STAGED"
+codesign --verify --deep --strict "$APP_STAGED"
 
 DMG_PATH="$BUILD_DIR/${APP_NAME}-${VERSION}.dmg"
 create-dmg \
@@ -71,10 +67,21 @@ create-dmg \
   "$DMG_PATH" \
   "$STAGED_DIR"
 
+codesign --timestamp --sign "$IDENTITY" "$DMG_PATH"
+codesign --verify "$DMG_PATH"
 echo "Built: $DMG_PATH"
 
-gh release create "$VERSION" \
-  "$DMG_PATH" \
-  --title "$VERSION" \
-  --notes "Release $VERSION" \
-  --latest
+if [[ "${2:-}" == "--publish" ]]; then
+  if [[ -n "${FOLIO_NOTARY_PROFILE:-}" ]]; then
+    xcrun notarytool submit "$DMG_PATH" --keychain-profile "$FOLIO_NOTARY_PROFILE" --wait
+  else
+    command -v asc >/dev/null || {
+      echo "Set FOLIO_NOTARY_PROFILE or configure asc authentication for notarization." >&2
+      exit 1
+    }
+    asc notarization submit --file "$DMG_PATH" --wait
+  fi
+  xcrun stapler staple "$DMG_PATH"
+  xcrun stapler validate "$DMG_PATH"
+  gh release create "$VERSION" "$DMG_PATH" --title "$VERSION" --notes "Release $VERSION" --latest
+fi

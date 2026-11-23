@@ -1,76 +1,59 @@
 import Foundation
+import Markdown
 import Observation
 
 @MainActor
 @Observable
 final class FindState {
-    var query: String = "" {
-        didSet { updateMatches() }
-    }
+    var query = "" { didSet { updateMatches() } }
+    private(set) var matches: [RenderedSearchMatch] = []
+    private(set) var currentIndex = 0
+    private var units: [(block: Int, source: Int, text: String)] = []
 
-    private(set) var matches: [NSRange] = []
-    private(set) var currentIndex: Int = -1
-    private(set) var highlightedBlockID: Int?
+    var normalizedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var activeMatch: RenderedSearchMatch? { matches.indices.contains(currentIndex) ? matches[currentIndex] : nil }
+    var matchDescription: String { matches.isEmpty ? "No matches" : "\(currentIndex + 1) of \(matches.count)" }
 
-    private var text: String = ""
-    private var blockRanges: [(index: Int, range: NSRange)] = []
-
-    var matchDescription: String {
-        guard !matches.isEmpty else { return "No matches" }
-        return "\(currentIndex + 1) of \(matches.count)"
-    }
-
-    func setContext(text: String, blockRanges: [(index: Int, range: NSRange)]) {
-        self.text = text
-        self.blockRanges = blockRanges
+    func setContext(_ snapshot: MarkdownSnapshot) {
+        units.removeAll()
+        func visit(_ node: Markup, block: Int) {
+            if node is Heading || node is Paragraph || node is Markdown.Table.Cell || node is CodeBlock {
+                guard let source = snapshot.range(node.child(at: 0) ?? node)?.location else { return }
+                units.append((block, source, renderedString(node)))
+            } else {
+                for child in node.children { visit(child, block: block) }
+            }
+        }
+        for (index, node) in snapshot.document.children.enumerated() { visit(node, block: index) }
         updateMatches()
     }
 
-    func next() {
-        guard !matches.isEmpty else { return }
-        currentIndex = (currentIndex + 1) % matches.count
-        updateHighlight()
-    }
-
-    func previous() {
-        guard !matches.isEmpty else { return }
-        currentIndex = (currentIndex - 1 + matches.count) % matches.count
-        updateHighlight()
-    }
-
-    func clear() {
-        query = ""
-        matches = []
-        currentIndex = -1
-        highlightedBlockID = nil
-    }
+    func next() { if !matches.isEmpty { currentIndex = (currentIndex + 1) % matches.count } }
+    func previous() { if !matches.isEmpty { currentIndex = (currentIndex + matches.count - 1) % matches.count } }
 
     private func updateMatches() {
-        matches = []
-        currentIndex = -1
-        highlightedBlockID = nil
-
-        let term = query.trimmingCharacters(in: .whitespaces)
-        guard !term.isEmpty, !text.isEmpty else { return }
-
-        let pattern = NSRegularExpression.escapedPattern(for: term)
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return }
-
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        matches = regex.matches(in: text, options: [], range: range).map { $0.range }
-
-        if !matches.isEmpty {
+        let previous = activeMatch
+        guard !normalizedQuery.isEmpty,
+              let regex = try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: normalizedQuery), options: .caseInsensitive) else {
+            matches = []
             currentIndex = 0
-            updateHighlight()
-        }
-    }
-
-    private func updateHighlight() {
-        guard currentIndex >= 0, currentIndex < matches.count else {
-            highlightedBlockID = nil
             return
         }
-        let match = matches[currentIndex]
-        highlightedBlockID = blockRanges.first { NSIntersectionRange(match, $0.range).length > 0 }?.index
+        matches = units.flatMap { unit in
+            regex.matches(in: unit.text, range: NSRange(location: 0, length: unit.text.utf16.count)).map {
+                RenderedSearchMatch(block: unit.block, source: unit.source, range: $0.range)
+            }
+        }
+        currentIndex = previous.flatMap { matches.firstIndex(of: $0) } ?? 0
+    }
+
+    private func renderedString(_ node: Markup) -> String {
+        switch node {
+        case let text as Markdown.Text: return text.string
+        case let code as InlineCode: return code.code
+        case let code as CodeBlock: return code.language?.lowercased() == "mermaid" ? "" : code.code
+        case is SoftBreak, is LineBreak: return "\n"
+        default: return node.children.map(renderedString).joined()
+        }
     }
 }

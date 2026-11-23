@@ -7,7 +7,6 @@ struct FolioApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var updateStore = UpdateStore()
     @State private var settingsStore = SettingsStore()
-    @AppStorage("hasSetDefaultMarkdownViewer") private var hasSetDefault = false
 
     var body: some Scene {
         Window("Welcome to Folio", id: "welcome") {
@@ -23,11 +22,14 @@ struct FolioApp: App {
                 .environment(settingsStore)
                 .task {
                     await updateStore.checkForUpdatesOnce()
-                    setDefaultMarkdownViewerOnce()
                 }
         }
         .defaultSize(width: 900, height: 988)
         .commands {
+            ToolbarCommands()
+            CommandGroup(after: .toolbar) {
+                ZoomMenuButtons()
+            }
             CommandGroup(after: .appInfo) {
                 Button("Set Folio as Default Markdown Viewer…") {
                     setAsDefaultMarkdownViewer()
@@ -45,12 +47,6 @@ struct FolioApp: App {
             SettingsView()
                 .environment(settingsStore)
         }
-    }
-
-    private func setDefaultMarkdownViewerOnce() {
-        guard !hasSetDefault else { return }
-        hasSetDefault = true
-        setAsDefaultMarkdownViewer()
     }
 
     private func setAsDefaultMarkdownViewer() {
@@ -74,31 +70,47 @@ private struct WelcomeMenuButton: View {
     }
 }
 
-// Routes ⌘F/G to the editor's NSTextView find bar, and also broadcasts a notification ContentView uses to drive the preview find bar (kept to one ⌘F binding to avoid shortcut collisions).
-private struct FindMenuButtons: View {
+struct FindCommands {
+    let toggleEditing: () -> Void
+    let zoomIn: () -> Void
+    let zoomOut: () -> Void
+    let resetZoom: () -> Void
+    let show: () -> Void
+    let next: () -> Void
+    let previous: () -> Void
+}
+
+extension FocusedValues {
+    @Entry var folioFind: FindCommands? = nil
+}
+
+private struct ZoomMenuButtons: View {
+    @FocusedValue(\.folioFind) private var commands
+
     var body: some View {
         Divider()
-        Button("Find…") { performFind(.showFindInterface, notification: .folioFindShow) }
-            .keyboardShortcut("f", modifiers: .command)
-        Button("Find Next") { performFind(.nextMatch, notification: .folioFindNext) }
-            .keyboardShortcut("g", modifiers: .command)
-        Button("Find Previous") { performFind(.previousMatch, notification: .folioFindPrevious) }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-        // No keyboard shortcut: ⌘E is already Folio's Preview/Edit toggle.
-        Button("Use Selection for Find") { performFind(.setSearchString, notification: .folioFindSetSelection) }
-    }
-
-    private func performFind(_ action: NSTextFinder.Action, notification: Notification.Name) {
-        let sender = NSMenuItem()
-        sender.tag = action.rawValue
-        NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: sender)
-        NotificationCenter.default.post(name: notification, object: nil)
+        Button("Zoom In") { commands?.zoomIn() }.keyboardShortcut("+").disabled(commands == nil)
+        Button("Zoom Out") { commands?.zoomOut() }.keyboardShortcut("-").disabled(commands == nil)
+        Button("Actual Size") { commands?.resetZoom() }.keyboardShortcut("0").disabled(commands == nil)
     }
 }
 
-extension Notification.Name {
-    static let folioFindShow = Notification.Name("folioFindShow")
-    static let folioFindNext = Notification.Name("folioFindNext")
-    static let folioFindPrevious = Notification.Name("folioFindPrevious")
-    static let folioFindSetSelection = Notification.Name("folioFindSetSelection")
+private struct FindMenuButtons: View {
+    @FocusedValue(\.folioFind) private var commands
+
+    var body: some View {
+        Divider()
+        Button("Toggle Read/Edit") { commands?.toggleEditing() }
+            .keyboardShortcut("e")
+            .disabled(commands == nil)
+        Button("Find…") { commands?.show() }
+            .keyboardShortcut("f")
+            .disabled(commands == nil)
+        Button("Find Next") { commands?.next() }
+            .keyboardShortcut("g")
+            .disabled(commands == nil)
+        Button("Find Previous") { commands?.previous() }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .disabled(commands == nil)
+    }
 }

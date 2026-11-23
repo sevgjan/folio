@@ -16,7 +16,7 @@ final class PreviewProvider: NSViewController, @MainActor QLPreviewingController
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            hostingView.rootView = AnyView(PreviewContent(markdown: text))
+            hostingView.rootView = AnyView(PreviewContent(markdown: text, baseURL: url.deletingLastPathComponent()))
             handler(nil)
         } catch {
             handler(error)
@@ -29,6 +29,7 @@ final class PreviewProvider: NSViewController, @MainActor QLPreviewingController
 /// with the app's fixed defaults rather than the user's saved theme/font settings.
 private struct PreviewContent: View {
     let markdown: String
+    let baseURL: URL
 
     private let theme = Theme.system
     private let fontFamily = SettingsStore.Defaults.fontFamily
@@ -44,7 +45,7 @@ private struct PreviewContent: View {
                 .environment(\.markdownFontFamily, fontFamily)
                 .environment(\.markdownReadingWidth, CGFloat(readingWidth))
                 .environment(\.markdownTableWidth, CGFloat(readingWidth * tableWidthRatio))
-                .environment(\.markdownMermaidEnabled, false)
+                .environment(\.markdownBaseURL, baseURL)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(32)
                 .textSelection(.enabled)

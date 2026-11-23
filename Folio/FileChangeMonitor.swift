@@ -14,6 +14,10 @@ final class FileChangeMonitor: NSObject, NSFilePresenter {
     }
 
     deinit {
+        stop()
+    }
+
+    func stop() {
         NSFileCoordinator.removeFilePresenter(self)
     }
 
@@ -29,8 +33,4 @@ final class FileChangeMonitor: NSObject, NSFilePresenter {
         guard let text else { return }
         onExternalChange(text)
     }
-}
-
-extension Notification.Name {
-    static let markdownDocumentDidSave = Notification.Name("markdownDocumentDidSave")
 }

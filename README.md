@@ -8,15 +8,13 @@ A native macOS markdown viewer and editor — clean typography, live rendering, 
 
 ## Why Folio
 
-Most markdown viewers either lock you into a read-only preview or force you to look at raw syntax while you write. Folio opens in a **rendered, read-only view** by default — links work, text is selectable, and the layout is tuned to be genuinely pleasant to read — but a triple-click drops you straight into a live-styled editor without ever leaving the document.
+Folio opens Markdown as a rendered page. Use Read / Edit or ⌘E to put a caret into the same page. **Edit Source…** opens the complete Markdown document.
 
-- Clean, centered reading column that expands only where it needs to (tables get the full window width)
-- Real syntax highlighting in code blocks, not just monospace text
-- Inline and block LaTeX math, rendered — not left as raw `$...$`
-- Mermaid diagrams rendered natively, sized to fit their content
-- A dedicated table editor — Tab between cells, add or remove rows and columns, no wrestling with `|` alignment by hand
-- Open the current file directly in Xcode, VS Code, or TextEdit from the toolbar
-- Share the actual document from the toolbar, not a text snippet
+- Centered reading column with extra room for tables
+- Syntax-highlighted code and offline LaTeX and Mermaid rendering
+- In-place table cell editing and a grid for adding or removing rows and columns
+- Document outline, Find, HTML and PDF export, and sharing
+- Open the original file in Xcode, VS Code, or TextEdit
 
 ## Requirements
 
@@ -38,7 +36,9 @@ The project uses Xcode's synced folder groups, so new files added under `Folio/`
 scripts/release.sh v0.1.0
 ```
 
-Archives a Release build, ad-hoc signs it, packages it as a DMG, and publishes a GitHub release via `gh`.
+Archives a Release build and packages it in a Developer ID signed DMG. Folio uses the Rolling Rabbits team, with the IDs com.rr.folio and com.rr.folio.QuickLook.
+
+To publish, configure a Rolling Rabbits notarization credential with `asc auth` or set `FOLIO_NOTARY_PROFILE` to the team's notarytool keychain profile, then pass `--publish`. The script notarizes and staples the DMG before uploading it to GitHub.
 
 ---
 

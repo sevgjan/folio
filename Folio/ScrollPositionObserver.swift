@@ -40,7 +40,7 @@ struct ScrollPositionObserver: NSViewRepresentable {
         Coordinator(onChange: onChange)
     }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var onChange: (Double) -> Void
         private(set) var isObserving = false
         private var scrollView: NSScrollView?
@@ -91,6 +91,27 @@ struct ScrollPositionObserver: NSViewRepresentable {
 
         deinit {
             NotificationCenter.default.removeObserver(self)
+        }
+    }
+}
+
+
+struct ReadingProgressObserver: ViewModifier {
+    let tracker: ScrollProgressTracker
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollGeometryChange(for: Double.self) { geometry in
+                let length = geometry.contentSize.height + geometry.contentInsets.top +
+                    geometry.contentInsets.bottom - geometry.containerSize.height
+                guard length > 0 else { return 0 }
+                let position = geometry.contentOffset.y + geometry.contentInsets.top
+                return min(max(Double(position / length), 0), 1)
+            } action: { _, progress in
+                tracker.progress = progress
+            }
+        } else {
+            content
         }
     }
 }

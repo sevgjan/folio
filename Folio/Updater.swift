@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Security
 
 @MainActor
 final class Updater: NSObject {
@@ -29,36 +30,65 @@ final class Updater: NSObject {
         downloadTask = nil
     }
 
-    func install(mountPoint: URL) {
-        let installPath = Bundle.main.bundleURL.path
-        let scriptPath = NSTemporaryDirectory() + "folio_update.sh"
-        let mountPointPath = mountPoint.path
-
-        let script = """
-        #!/bin/bash
-        sleep 2
-        rm -rf \(shellEscape(installPath))
-        cp -R \(shellEscape(mountPointPath))/Folio.app \(shellEscape(installPath))
-        open \(shellEscape(installPath))
-        hdiutil detach \(shellEscape(mountPointPath)) -quiet 2>/dev/null || true
-        """
-
+    func install(mountPoint: URL) throws {
+        let installed = Bundle.main.bundleURL
+        let candidate = mountPoint.appendingPathComponent("Folio.app", isDirectory: true)
+        try verify(candidate)
+        let manager = FileManager.default
+        let staging = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                      appropriateFor: installed, create: true)
+        let staged = staging.appendingPathComponent("Folio.app", isDirectory: true)
         do {
-            try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath)
+            try manager.copyItem(at: candidate, to: staged)
+            try verify(staged)
+            let script = #"""
+            set -eu
+            for tick in {1..60}; do
+              if ! kill -0 "$1" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$1" 2>/dev/null; then exit 1; fi
+            backup="$4/Previous Folio.app"
+            /bin/mv "$2" "$backup"
+            if /bin/mv "$3" "$2"; then
+              if /usr/bin/open "$2"; then
+                /bin/rm -rf "$backup"
+              else
+                /bin/mv "$2" "$3"
+                /bin/mv "$backup" "$2"
+                /usr/bin/open "$2" || true
+              fi
+            else
+              /bin/mv "$backup" "$2"
+              /usr/bin/open "$2" || true
+            fi
+            /usr/bin/hdiutil detach "$5" -quiet 2>/dev/null || true
+            /bin/rmdir "$4" 2>/dev/null || true
+            """#
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", script, "folio-update", String(ProcessInfo.processInfo.processIdentifier),
+                                 installed.path, staged.path, staging.path, mountPoint.path]
+            try process.run()
         } catch {
-            return
+            try? manager.removeItem(at: staging)
+            throw error
         }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptPath]
-        try? process.run()
     }
 
-    private func shellEscape(_ path: String) -> String {
-        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    private func verify(_ app: URL) throws {
+        var code: SecStaticCode?
+        var requirement: SecRequirement?
+        let condition = #"anchor apple generic and identifier "com.rr.folio" and certificate leaf[subject.OU] = "Q4FVJUH2ZJ" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"#
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(condition as CFString, [], &requirement) == errSecSuccess,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode), requirement) == errSecSuccess
+        else {
+            throw NSError(domain: "FolioUpdate", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "The update does not have a valid Rolling Rabbits signature."])
+        }
     }
+
 }
 
 extension Updater: URLSessionDownloadDelegate {
@@ -81,21 +111,20 @@ extension Updater: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        let dmgPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Folio_update.dmg")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("FolioUpdate-" + UUID().uuidString)
+        let dmgPath = directory.appendingPathComponent("Folio.dmg")
         do {
-            if FileManager.default.fileExists(atPath: dmgPath.path) {
-                try FileManager.default.removeItem(at: dmgPath)
-            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: location, to: dmgPath)
         } catch {
             Task { @MainActor in self.onError?("Failed to save download: \(error.localizedDescription)") }
             return
         }
 
-        let mountPoint = NSTemporaryDirectory() + "Folio_mount"
+        let mountPoint = directory.appendingPathComponent("Mounted").path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = ["attach", dmgPath.path, "-nobrowse", "-quiet", "-mountpoint", mountPoint]
+        process.arguments = ["attach", "-readonly", dmgPath.path, "-nobrowse", "-quiet", "-mountpoint", mountPoint]
 
         do {
             try process.run()

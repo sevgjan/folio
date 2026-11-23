@@ -71,8 +71,9 @@ struct TableEditorSheet: View {
                 .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Done") {
-                    let results = zip(candidates, editedTables).map { candidate, table in
-                        TableCandidate(range: candidate.range, table: table)
+                    let results = zip(candidates, editedTables).compactMap { candidate, table -> TableCandidate? in
+                        guard candidate.table != table else { return nil }
+                        return TableCandidate(range: candidate.range, table: table)
                     }
                     onSave(results)
                 }

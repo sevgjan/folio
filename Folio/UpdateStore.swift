@@ -44,8 +44,13 @@ final class UpdateStore {
 
     func installAndRelaunch() {
         guard case let .ready(mountPoint, _) = state else { return }
-        updater?.install(mountPoint: mountPoint)
-        NSApp.terminate(nil)
+        guard let updater else { return }
+        do {
+            try updater.install(mountPoint: mountPoint)
+            NSApp.terminate(nil)
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
     }
 
     func dismiss() {

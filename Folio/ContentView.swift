@@ -1,8 +1,10 @@
 import AppKit
+import Markdown
 import SwiftUI
 
 private struct TableEditorSession: Identifiable {
     let id = UUID()
+    let source: String
     let candidates: [TableCandidate]
 }
 
@@ -22,7 +24,7 @@ private struct OutlineSidebarView: View {
     var body: some View {
         List {
             if headings.isEmpty {
-                Text("No headings")
+                SwiftUI.Text("No headings")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             } else {
@@ -60,8 +62,12 @@ struct ContentView: View {
     @Environment(SettingsStore.self) private var settingsStore
     @State private var zoom: CGFloat = 1.0
     @State private var isPreviewing: Bool
-    @State private var editableTextView: MarkdownTextView?
-    @State private var tableEditorSession: TableEditorSession?
+    @State private var snapshot: MarkdownSnapshot
+    @State private var focusBlock: Int?
+    @State private var showSource = false
+    @State private var tableSession: TableEditorSession?
+    @State private var showExternalVersion = false
+    @State private var externalText: String?
     @State private var fileMonitor: FileChangeMonitor?
     @State private var lastKnownDiskText: String?
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
@@ -70,13 +76,17 @@ struct ContentView: View {
     @State private var scrollTarget: Int?
     @State private var scrollTracker = ScrollProgressTracker()
     @State private var visibleBlockTracker = VisibleBlockTracker()
-    @State private var headings: [HeadingItem] = []
-    @State private var editCursorLocation: Int = 0
-    @State private var editTextLength: Int = 0
+    private var headings: [HeadingItem] {
+        snapshot.document.children.enumerated().compactMap { index, block in
+            guard let heading = block as? Heading, let range = snapshot.range(heading) else { return nil }
+            return HeadingItem(id: index, level: heading.level, title: heading.plainText, sourceRange: range)
+        }
+    }
 
     init(document: Binding<MarkdownDocument>, fileURL: URL?) {
         self._document = document
         self.fileURL = fileURL
+        self._snapshot = State(initialValue: MarkdownSnapshot(document.wrappedValue.text))
         // No fileURL means a brand-new unsaved document — start it in edit mode, not previewing blank content.
         self._isPreviewing = State(initialValue: fileURL != nil)
     }
@@ -97,99 +107,119 @@ struct ContentView: View {
         document.text.count
     }
 
-    private var editProgress: Double {
-        guard editTextLength > 0 else { return 0 }
-        return min(max(Double(editCursorLocation) / Double(editTextLength), 0), 1)
-    }
-
-    private func themedFont(size: CGFloat) -> Font {
-        settingsStore.fontFamily.isEmpty ? .system(size: size) : .custom(settingsStore.fontFamily, size: size)
-    }
-
     private func startFileMonitoring() {
+        fileMonitor?.stop()
+        fileMonitor = nil
+        externalText = nil
         guard let fileURL else { return }
-        lastKnownDiskText = document.text
+        lastKnownDiskText = try? String(contentsOf: fileURL, encoding: .utf8)
+        if let lastKnownDiskText { document.revision.accept(lastKnownDiskText) }
         fileMonitor = FileChangeMonitor(fileURL: fileURL) { newText in
-            // Only reload if there are no unsaved local edits, so we never clobber active typing.
-            guard document.text == lastKnownDiskText, newText != document.text else { return }
-            document.text = newText
-            lastKnownDiskText = newText
+            if newText == document.text || document.revision.knows(newText) {
+                document.revision.accept(newText)
+                lastKnownDiskText = newText
+                externalText = nil
+            } else if document.text == lastKnownDiskText {
+                document.revision.accept(newText)
+                document.text = newText
+                lastKnownDiskText = newText
+                externalText = nil
+            } else {
+                document.revision.recordConflict(newText)
+                externalText = newText
+            }
         }
+    }
+
+    private func replace(_ expected: String, _ replacements: [MarkdownReplacement]) -> Bool {
+        guard document.text == expected else { return false }
+        let result = NSMutableString(string: expected)
+        for replacement in replacements.sorted(by: { $0.range.location > $1.range.location }) {
+            guard NSMaxRange(replacement.range) <= result.length else { return false }
+            result.replaceCharacters(in: replacement.range, with: replacement.text)
+        }
+        let updated = result as String
+        if updated != expected { document.text = updated }
+        return true
+    }
+
+    private func showTableEditor() {
+        func candidates(in node: Markup) -> [TableCandidate] {
+            if node is Markdown.Table, let range = snapshot.range(node),
+               let table = MarkdownTableFormatter.parse((snapshot.source as NSString).substring(with: range)) {
+                return [TableCandidate(range: range, table: table)]
+            }
+            return node.children.flatMap(candidates)
+        }
+        let tables = candidates(in: snapshot.document)
+        if !tables.isEmpty { tableSession = TableEditorSession(source: snapshot.source, candidates: tables) }
+    }
+
+    private func toggleEditing() {
+        focusBlock = isPreviewing ? visibleBlockTracker.blockID ?? 0 : nil
+        isPreviewing.toggle()
+    }
+
+    private func zoomIn() { zoom = min(2.5, zoom + 0.1) }
+    private func zoomOut() { zoom = max(0.5, zoom - 0.1) }
+    private func resetZoom() { zoom = 1 }
+
+    private func refreshFind() {
+        findState.setContext(snapshot)
     }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
             OutlineSidebarView(headings: headings, visibleBlockTracker: visibleBlockTracker) { blockID in
-                // Jumping from the outline always switches to preview — there's nothing to scroll to in edit mode.
-                if !isPreviewing { isPreviewing = true }
                 scrollTarget = blockID
             }
             .navigationSplitViewColumnWidth(220)
         } detail: {
             VStack(spacing: 0) {
-                Group {
-                    if isPreviewing {
-                        ScrollViewReader { proxy in
-                            ScrollView {
-                                MarkdownRenderer(markdown: document.text)
-                                    .font(themedFont(size: settingsStore.baseFontSize * zoom))
-                                    .foregroundStyle(settingsStore.theme.id == "system" ? Color.primary : settingsStore.theme.foreground)
-                                    .environment(\.markdownFontScale, zoom)
-                                    .environment(\.markdownTheme, settingsStore.theme)
-                                    .environment(\.markdownFontFamily, settingsStore.fontFamily)
-                                    .environment(\.markdownReadingWidth, CGFloat(settingsStore.readingWidth))
-                                    .environment(\.markdownTableWidth, CGFloat(settingsStore.tableWidth))
-                                    .environment(\.markdownHighlightQuery, isFindBarVisible ? findState.query : nil)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(32)
-                                    .textSelection(.enabled)
-                                    .background(ScrollPositionObserver { progress in scrollTracker.progress = progress })
-                            }
-                            .scrollPosition(
-                                id: Binding(
-                                    get: { visibleBlockTracker.blockID },
-                                    set: { visibleBlockTracker.blockID = $0 }
-                                ),
-                                anchor: .top
-                            )
-                            .background(settingsStore.theme.background)
-                            .onTapGesture(count: 3) {
-                                isPreviewing = false
-                            }
-                            .onChange(of: findState.highlightedBlockID) { _, blockID in
-                                guard let blockID else { return }
-                                withAnimation { proxy.scrollTo(blockID, anchor: .center) }
-                            }
-                            // .task also fires on first appearance, unlike onChange — needed since editing-to-preview jumps set scrollTarget before this view even exists.
-                            .task(id: scrollTarget) {
-                                guard let target = scrollTarget else { return }
-                                withAnimation { proxy.scrollTo(target, anchor: .top) }
-                                scrollTarget = nil
-                            }
-                            .overlay(alignment: .topTrailing) {
-                                if isFindBarVisible {
-                                    FindBar(state: findState) {
-                                        isFindBarVisible = false
-                                        findState.clear()
-                                    }
-                                }
-                            }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        if snapshot.document.isEmpty {
+                            InlineText(children: [], emptySource: snapshot.document)
+                                .centeredReadingColumn(maxWidth: settingsStore.readingWidth)
+                                .environment(\.markdownBlockIndex, 0)
+                                .padding(32)
+                        } else {
+                            MarkdownRenderer(snapshot: snapshot)
+                                .padding(32)
+                                .background(ScrollPositionObserver { progress in scrollTracker.progress = progress })
                         }
-                    } else {
-                        MarkdownEditorView(
-                            text: $document.text,
-                            fontSize: (settingsStore.baseFontSize + 1) * zoom,
-                            fontFamily: settingsStore.fontFamily,
-                            theme: settingsStore.theme
-                        ) { textView in
-                            DispatchQueue.main.async {
-                                editableTextView = textView
-                            }
-                        } onSelectionChange: { location, length in
-                            editCursorLocation = location
-                            editTextLength = length
+                    }
+                    .environment(\.markdownEditing, MarkdownEditing(snapshot: snapshot, isEditing: !isPreviewing,
+                                                                     focusBlock: focusBlock, replace: replace))
+                    .environment(\.markdownFontScale, zoom)
+                    .environment(\.markdownBodySize, settingsStore.baseFontSize * zoom)
+                    .environment(\.markdownTheme, settingsStore.theme)
+                    .environment(\.markdownFontFamily, settingsStore.fontFamily)
+                    .environment(\.markdownReadingWidth, settingsStore.readingWidth)
+                    .environment(\.markdownTableWidth, settingsStore.tableWidth)
+                    .environment(\.markdownBaseURL, fileURL?.deletingLastPathComponent())
+                    .environment(\.markdownHighlightQuery, isFindBarVisible ? findState.normalizedQuery : nil)
+                    .environment(\.markdownActiveMatch, isFindBarVisible ? findState.activeMatch : nil)
+                    .foregroundStyle(settingsStore.theme.id == "system" ? Color.primary : settingsStore.theme.foreground)
+                    .background(settingsStore.theme.background)
+                    .modifier(ReadingProgressObserver(tracker: scrollTracker))
+                    .scrollPosition(
+                        id: Binding(get: { visibleBlockTracker.blockID }, set: { visibleBlockTracker.blockID = $0 }),
+                        anchor: .top
+                    )
+                    .onChange(of: findState.activeMatch) { _, match in
+                        guard let match else { return }
+                        proxy.scrollTo(match.block, anchor: .center)
+                    }
+                    .task(id: scrollTarget) {
+                        guard let target = scrollTarget else { return }
+                        proxy.scrollTo(target, anchor: .top)
+                        scrollTarget = nil
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if isFindBarVisible {
+                            FindBar(state: findState) { isFindBarVisible = false }
                         }
-                        .background(settingsStore.theme.background)
                     }
                 }
                 .background(WindowAppearanceSetter(colorScheme: settingsStore.theme.colorScheme))
@@ -198,9 +228,7 @@ struct ContentView: View {
                 StatusBarView(
                     wordCount: wordCount,
                     characterCount: characterCount,
-                    isPreviewing: isPreviewing,
-                    scrollTracker: scrollTracker,
-                    editProgress: editProgress
+                    scrollTracker: scrollTracker
                 )
             }
         }
@@ -211,177 +239,174 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if externalText != nil {
+                HStack {
+                    Label("File Changed on Disk", systemImage: "exclamationmark.circle")
+                    Spacer()
+                    Button("Review…") { showExternalVersion = true }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.regularMaterial)
+            }
+        }
         .animation(.spring(duration: 0.3), value: updateStore.state)
-        .onAppear {
-            startFileMonitoring()
-            headings = HeadingParser.parse(document.text)
-            if isPreviewing {
-                findState.setContext(text: document.text, blockRanges: HeadingParser.blockRanges(in: document.text))
-            }
-        }
+        .task(id: fileURL) { startFileMonitoring() }
+        .onAppear { refreshFind() }
+        .onDisappear { fileMonitor?.stop(); fileMonitor = nil }
         .onChange(of: document.text) { _, newText in
-            headings = HeadingParser.parse(newText)
-            guard isPreviewing else { return }
-            findState.setContext(text: newText, blockRanges: HeadingParser.blockRanges(in: newText))
+            snapshot = MarkdownSnapshot(newText)
+            refreshFind()
         }
-        .onChange(of: isPreviewing) { _, previewing in
-            if previewing {
-                findState.setContext(text: document.text, blockRanges: HeadingParser.blockRanges(in: document.text))
-            } else {
-                isFindBarVisible = false
-                findState.clear()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markdownDocumentDidSave)) { note in
-            guard let text = note.userInfo?["text"] as? String, text == document.text else { return }
-            lastKnownDiskText = text
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .folioFindShow)) { _ in
-            guard isPreviewing else { return }
-            isFindBarVisible.toggle()
-            if !isFindBarVisible { findState.clear() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .folioFindNext)) { _ in
-            guard isPreviewing, isFindBarVisible else { return }
-            findState.next()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .folioFindPrevious)) { _ in
-            guard isPreviewing, isFindBarVisible else { return }
-            findState.previous()
-        }
-        .sheet(item: $tableEditorSession) { session in
-            TableEditorSheet(candidates: session.candidates) { edited in
-                for candidate in edited.sorted(by: { $0.range.location > $1.range.location }) {
-                    let text = MarkdownTableFormatter.serialize(candidate.table)
-                    editableTextView?.replaceTableBlock(range: candidate.range, with: text)
+        .focusedSceneValue(\.folioFind, FindCommands(
+            toggleEditing: toggleEditing,
+            zoomIn: zoomIn, zoomOut: zoomOut, resetZoom: resetZoom,
+            show: { isFindBarVisible = true },
+            next: { isFindBarVisible = true; findState.next() },
+            previous: { isFindBarVisible = true; findState.previous() }
+        ))
+        .sheet(item: $tableSession) { session in
+            TableEditorSheet(candidates: session.candidates) { changes in
+                let original = session.source as NSString
+                let operations = changes.flatMap { change in
+                    MarkdownTableFormatter.replacements(in: original.substring(with: change.range),
+                                                        at: change.range.location, with: change.table)
                 }
-                tableEditorSession = nil
+                if replace(session.source, operations) { tableSession = nil }
+                else { NSSound.beep() }
             } onCancel: {
-                tableEditorSession = nil
+                tableSession = nil
             }
         }
-        .toolbar {
-            // Sidebar toggle button is automatic, courtesy of NavigationSplitView.
-            ToolbarItemGroup {
-                Button {
-                    zoom = max(0.5, zoom - 0.1)
-                } label: {
-                    Image(systemName: "minus.magnifyingglass")
-                }
-                .keyboardShortcut("-", modifiers: .command)
-
-                Button {
-                    zoom = 1.0
-                } label: {
-                    Image(systemName: "1.magnifyingglass")
-                }
-                .keyboardShortcut("0", modifiers: .command)
-
-                Button {
-                    zoom = min(2.5, zoom + 0.1)
-                } label: {
-                    Image(systemName: "plus.magnifyingglass")
-                }
-                .keyboardShortcut("+", modifiers: .command)
+        .sheet(isPresented: $showSource) {
+            VStack(alignment: .trailing, spacing: 0) {
+                MarkdownEditorView(text: $document.text, fontSize: settingsStore.baseFontSize * zoom,
+                                   fontFamily: settingsStore.fontFamily, theme: settingsStore.theme,
+                                   onTextViewReady: { _ in }, onSelectionChange: { _, _ in })
+                Divider()
+                Button("Done") { showSource = false }.keyboardShortcut(.defaultAction).padding()
             }
-
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.fixed)
-            }
-
-
-            ToolbarItemGroup {
-                if isPreviewing {
-                    Button {
-                        isFindBarVisible.toggle()
-                        if !isFindBarVisible { findState.clear() }
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .help("Find in Document")
-                }
-            }
-
-            ToolbarItemGroup {
-                if !isPreviewing {
-                    Button {
-                        let candidates = (editableTextView?.allTableBlocks() ?? []).compactMap { block -> TableCandidate? in
-                            guard let parsed = MarkdownTableFormatter.parse(block.text) else { return nil }
-                            return TableCandidate(range: block.range, table: parsed)
+            .frame(minWidth: 620, minHeight: 440)
+        }
+        .sheet(isPresented: $showExternalVersion) {
+            VStack(alignment: .leading, spacing: 16) {
+                SwiftUI.Text("The file changed on disk").font(.headline)
+                SwiftUI.Text("Save your edits to a new file to keep both versions.")
+                HStack {
+                    Button("Cancel") { showExternalVersion = false }
+                    Button("Reload Disk Version", role: .destructive) {
+                        if let externalText {
+                            document.revision.accept(externalText)
+                            document.text = externalText
+                            lastKnownDiskText = externalText
                         }
-                        guard !candidates.isEmpty else { return }
-                        tableEditorSession = TableEditorSession(candidates: candidates)
-                    } label: {
-                        Image(systemName: "tablecells")
+                        externalText = nil
+                        showExternalVersion = false
                     }
-                    .help("Edit Table")
-                }
-
-                Button {
-                    isPreviewing.toggle()
-                } label: {
-                    Image(systemName: isPreviewing ? "pencil" : "eye")
-                }
-                .keyboardShortcut("e", modifiers: .command)
-                .help(isPreviewing ? "Edit" : "Preview")
-
-                Menu {
-                    Button("Export as HTML…") {
-                        ExportManager.exportHTML(markdown: document.text, suggestedName: exportBaseName)
-                    }
-                    Button("Export as PDF…") {
-                        ExportManager.exportPDF(markdown: document.text, suggestedName: exportBaseName)
-                    }
-                } label: {
-                    Image(systemName: "square.and.arrow.up.on.square")
-                }
-                .help("Export")
-
-                if let fileURL {
-                    Menu {
-                        ForEach(ExternalEditor.allCases, id: \.self) { editor in
-                            if editor.appURL != nil {
-                                Button {
-                                    editor.open(fileURL)
-                                } label: {
-                                    Label {
-                                        Text(editor.title)
-                                    } icon: {
-                                        if let icon = editor.icon {
-                                            Image(nsImage: icon)
-                                                .resizable()
-                                                .frame(width: 16, height: 16)
-                                        }
-                                    }
-                                }
+                    Button("Save Local Copy…") {
+                        let panel = NSSavePanel()
+                        panel.nameFieldStringValue = exportBaseName + " (Folio edits).md"
+                        guard panel.runModal() == .OK, let url = panel.url else { return }
+                        guard url.resolvingSymlinksInPath() != fileURL?.resolvingSymlinksInPath() else {
+                            NSApp.presentError(CocoaError(.fileWriteFileExists, userInfo: [
+                                NSLocalizedDescriptionKey: "Choose a different location to keep both versions."
+                            ]))
+                            return
+                        }
+                        do {
+                            try document.text.write(to: url, atomically: true, encoding: .utf8)
+                            if let externalText {
+                                document.revision.accept(externalText)
+                                document.text = externalText
+                                lastKnownDiskText = externalText
                             }
+                            externalText = nil
+                            showExternalVersion = false
+                        } catch { NSApp.presentError(error) }
+                    }
+                }
+            }.padding(24)
+        }
+        .toolbar(id: "folio.document.toolbar.v2") {
+            ToolbarItem(id: "mode") {
+                Picker("Mode", selection: Binding(get: { isPreviewing }, set: { if $0 != isPreviewing { toggleEditing() } })) {
+                    SwiftUI.Text("Read").tag(true)
+                    SwiftUI.Text("Edit").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            ToolbarItem(id: "find") {
+                Button {
+                    isFindBarVisible.toggle()
+                } label: {
+                    Label("Find in Document", systemImage: "magnifyingglass")
+                }
+                .labelStyle(.iconOnly)
+            }
+            ToolbarItem(id: "open-in") {
+                Menu {
+                    if let fileURL {
+                        ForEach(ExternalEditor.allCases.filter { $0.appURL != nil }, id: \.self) { editor in
+                            Button(editor.title) { editor.open(fileURL) }
                         }
                         Divider()
-                        Button {
+                        Button("Reveal in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-                        } label: {
-                            Label {
-                                Text("Reveal in Finder")
-                            } icon: {
-                                Image(nsImage: finderIcon)
-                                    .resizable()
-                                    .frame(width: 16, height: 16)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.forward.app")
-                            Divider()
-                                .frame(height: 14)
                         }
                     }
+                } label: {
+                    Label("Open In", systemImage: "arrow.up.forward.app")
                 }
+                .labelStyle(.iconOnly)
+                .help("Open In")
+                .disabled(fileURL == nil)
             }
-
-            ToolbarItemGroup {
-                if let fileURL {
-                    ShareLink(item: fileURL)
+            ToolbarItem(id: "share-as") {
+                Menu {
+                    if let fileURL {
+                        ShareLink(item: fileURL) {
+                            Label("Share Markdown File…", systemImage: "doc")
+                        }
+                        Divider()
+                    }
+                    Button("Export as HTML…") {
+                        ExportManager.exportHTML(markdown: document.text, suggestedName: exportBaseName, fileURL: fileURL)
+                    }
+                    Button("Export as PDF…") {
+                        ExportManager.exportPDF(markdown: document.text, suggestedName: exportBaseName, fileURL: fileURL)
+                    }
+                } label: {
+                    Label("Share As", systemImage: "square.and.arrow.up")
                 }
+                .labelStyle(.iconOnly)
+                .help("Share As")
+            }
+            ToolbarItem(id: "zoom-out", showsByDefault: false) {
+                Button(action: zoomOut) { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
+            }
+            ToolbarItem(id: "actual-size", showsByDefault: false) {
+                Button(action: resetZoom) { Label("Actual Size", systemImage: "1.magnifyingglass") }
+            }
+            ToolbarItem(id: "zoom-in", showsByDefault: false) {
+                Button(action: zoomIn) { Label("Zoom In", systemImage: "plus.magnifyingglass") }
+            }
+            ToolbarItem(id: "document-actions") {
+                Menu {
+                    Button(isPreviewing ? "Edit" : "Read", action: toggleEditing)
+                    Button("Edit Source…") { showSource = true }
+                    Button("Edit Tables…", action: showTableEditor)
+                        .disabled(!snapshot.document.children.contains { $0 is Markdown.Table })
+                    Divider()
+                    Button("Zoom In", action: zoomIn)
+                    Button("Zoom Out", action: zoomOut)
+                    Button("Actual Size", action: resetZoom)
+                } label: {
+                    Label("Document Actions", systemImage: "ellipsis")
+                }
+                .labelStyle(.iconOnly)
             }
         }
     }
