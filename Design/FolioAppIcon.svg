@@ -20,6 +20,5 @@
   <rect width="1024" height="1024" fill="url(#glow)"/>
   <path d="M742 0h282v282L742 0Z" fill="#6AA17A" opacity=".11"/>
   <path d="M782 0h242v242L782 0Z" fill="#A9C986" opacity=".14"/>
-  <text x="512" y="590" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="390" font-weight="700" letter-spacing="-30" fill="#FFFFFF" filter="url(#soft)">MD</text>
-  <path d="M426 696h172" fill="none" stroke="#A9D48F" stroke-width="18" stroke-linecap="round" opacity=".95"/>
+  <text x="512" y="650" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="390" font-weight="700" letter-spacing="-30" fill="#FFFFFF" filter="url(#soft)">MD</text>
 </svg>
